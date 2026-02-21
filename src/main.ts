@@ -7,11 +7,11 @@ import { join } from 'path/win32';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Solo servir archivos estáticos en desarrollo
   if (process.env.NODE_ENV === 'development') {
-    const app = await NestFactory.create<NestExpressApplication>(AppModule);
-    app.useStaticAssets(join(__dirname, '..', 'public'));
+    // app.useStaticAssets(join(__dirname, '..', 'public'));
     console.log('📁 Static files enabled: /public');
   }
 
