@@ -48,7 +48,9 @@ export class EmailService {
       return;
     }
 
-    const verificationUrl = `${this.configService.get('FRONTEND_URL')}/verify-email?token=${token}`;
+    const verificationUrl = `${this.configService.get(
+      'FRONTEND_URL',
+    )}/verify-email?token=${token}`;
 
     const html = this.getVerificationEmailTemplate(fullName, verificationUrl);
 
@@ -60,9 +62,7 @@ export class EmailService {
         html,
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       this.logger.log(
         `📧 Verification email sent to ${email} (ID: ${data?.id})`,
@@ -90,7 +90,9 @@ export class EmailService {
       return;
     }
 
-    const resetUrl = `${this.configService.get('FRONTEND_URL')}/reset-password?token=${token}`;
+    const resetUrl = `${this.configService.get(
+      'FRONTEND_URL',
+    )}/reset-password?token=${token}`;
 
     const html = this.getPasswordResetEmailTemplate(fullName, resetUrl);
 
@@ -102,9 +104,7 @@ export class EmailService {
         html,
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       this.logger.log(
         `📧 Password reset email sent to ${email} (ID: ${data?.id})`,
@@ -142,13 +142,11 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: '✅ Turno Confirmado - Turnera Médica',
+        subject: 'Turno confirmado - Turnera Médica',
         html,
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       this.logger.log(
         `📧 Appointment confirmation sent to ${email} (ID: ${data?.id})`,
@@ -158,8 +156,7 @@ export class EmailService {
         `❌ Error sending appointment confirmation to ${email}:`,
         error,
       );
-      // No lanzar error para no bloquear la creación del turno
-      // Solo loguear
+      // No bloquea la creación del turno
     }
   }
 
@@ -186,13 +183,11 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: '⏰ Recordatorio de Turno - Mañana',
+        subject: 'Recordatorio de turno - Turnera Médica',
         html,
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       this.logger.log(
         `📧 Appointment reminder sent to ${email} (ID: ${data?.id})`,
@@ -229,13 +224,11 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: '❌ Turno Cancelado - Turnera Médica',
+        subject: 'Turno cancelado - Turnera Médica',
         html,
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       this.logger.log(
         `📧 Appointment cancellation sent to ${email} (ID: ${data?.id})`,
@@ -248,228 +241,357 @@ export class EmailService {
     }
   }
 
-  // ============================================
-  // TEMPLATES HTML
-  // ============================================
+  // ============================================================
+  // BASE TEMPLATE (ESTÉTICA ROSA / PRO)
+  // ============================================================
+
+  private getBaseEmailTemplate(params: {
+    preheader?: string;
+    title: string;
+    greetingName: string;
+    introHtml: string;
+    bodyHtml: string;
+    cta?: { label: string; url: string };
+    footerLines?: string[];
+    variant?: 'default' | 'success' | 'warning' | 'danger';
+  }): string {
+    const {
+      preheader = '',
+      title,
+      greetingName,
+      introHtml,
+      bodyHtml,
+      cta,
+      footerLines = [],
+      variant = 'default',
+    } = params;
+
+    // Paleta basada en tu web (rosa empolvado elegante)
+    const COLORS = {
+      bg: '#FAF4F6',
+      card: '#FFFFFF',
+      text: '#2E2E2E',
+      muted: '#7A7A7A',
+      border: '#EAD3D8',
+
+      primary: '#D9A3AE',
+      primaryHover: '#C98F9B',
+      soft: '#F3DCE2',
+
+      // Variantes suaves (sin amarillo ni rojo fuerte)
+      success: '#BFA2AA',
+      warning: '#D9A3AE',
+      danger: '#C17886',
+    };
+
+    const variantMap = {
+      default: {
+        accent: COLORS.primary,
+        accentSoft: COLORS.soft,
+        label: 'Info',
+      },
+      success: {
+        accent: COLORS.success,
+        accentSoft: '#F5EFF1',
+        label: 'Confirmado',
+      },
+      warning: {
+        accent: COLORS.warning,
+        accentSoft: '#F3DCE2',
+        label: 'Recordatorio',
+      },
+      danger: {
+        accent: COLORS.danger,
+        accentSoft: '#F7E6EA',
+        label: 'Cancelado',
+      },
+    }[variant];
+
+    const businessName =
+      this.configService.get('BUSINESS_NAME') || 'Turnera Médica';
+    const businessAddress = this.configService.get('BUSINESS_ADDRESS') || '';
+    const businessPhone = this.configService.get('BUSINESS_PHONE') || '';
+    const footerDefault = [businessName, businessAddress, businessPhone].filter(
+      Boolean,
+    );
+    const finalFooterLines = footerLines.length ? footerLines : footerDefault;
+
+    return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>${title}</title>
+  <style>
+    html, body { margin:0; padding:0; background:${COLORS.bg}; }
+    img { border:0; outline:none; text-decoration:none; }
+    table { border-collapse:collapse; }
+    a { text-decoration:none; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      color: ${COLORS.text};
+      line-height: 1.55;
+    }
+
+    .wrap { width:100%; background:${COLORS.bg}; padding:24px 12px; }
+    .container { max-width:640px; margin:0 auto; }
+
+    .card {
+      background:${COLORS.card};
+      border:1px solid ${COLORS.border};
+      border-radius:16px;
+      overflow:hidden;
+      box-shadow:0 8px 24px rgba(17, 24, 39, 0.06);
+    }
+
+    .header {
+      padding:28px 26px 18px 26px;
+      background: linear-gradient(135deg, ${COLORS.soft} 0%, #FFFFFF 60%);
+      border-bottom:1px solid ${COLORS.border};
+    }
+
+    .badge {
+      display:inline-block;
+      padding:6px 10px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:700;
+      color:${variantMap.accent};
+      background:${variantMap.accentSoft};
+      border:1px solid ${COLORS.border};
+      letter-spacing:0.2px;
+    }
+
+    .title {
+      margin:14px 0 0 0;
+      font-size:22px;
+      line-height:1.25;
+      letter-spacing:-0.2px;
+    }
+
+    .content { padding:22px 26px 8px 26px; font-size:15px; }
+    .muted { color:${COLORS.muted}; }
+
+    .infoBox {
+      margin:16px 0;
+      padding:14px 14px;
+      border-radius:14px;
+      background:#FFFFFF;
+      border:1px solid ${COLORS.border};
+    }
+
+    .infoRow { margin:0 0 8px 0; font-size:14px; }
+    .infoRow strong { display:inline-block; min-width:72px; }
+
+    .ctaWrap { text-align:center; padding:10px 26px 22px 26px; }
+
+    .btn {
+      display:inline-block;
+      background:${COLORS.primary};
+      color:#FFFFFF !important;
+      padding:12px 22px;
+      border-radius:999px;
+      font-weight:700;
+      font-size:14px;
+      letter-spacing:0.3px;
+      box-shadow:0 6px 16px rgba(201, 143, 155, 0.35);
+      transition: all 0.2s ease;
+    }
+    .btn:hover { background:${COLORS.primaryHover}; }
+
+    .divider { height:1px; background:${COLORS.border}; margin:18px 0; }
+
+    .link {
+      color:${COLORS.primaryHover};
+      word-break:break-all;
+      font-size:13px;
+    }
+
+    .footer {
+      padding:16px 26px 22px 26px;
+      font-size:12px;
+      color:${COLORS.muted};
+    }
+
+    .preheader {
+      display:none !important;
+      visibility:hidden;
+      opacity:0;
+      color:transparent;
+      height:0;
+      width:0;
+      overflow:hidden;
+      mso-hide:all;
+    }
+  </style>
+</head>
+<body>
+  <span class="preheader">${preheader}</span>
+
+  <div class="wrap">
+    <div class="container">
+      <div class="card">
+        <div class="header">
+          <span class="badge">${variantMap.label}</span>
+          <h1 class="title">${title}</h1>
+        </div>
+
+        <div class="content">
+          <p>Hola <strong>${greetingName}</strong>,</p>
+          ${introHtml}
+          ${bodyHtml}
+        </div>
+
+        ${
+          cta
+            ? `
+          <div class="ctaWrap">
+            <a class="btn" href="${cta.url}" target="_blank" rel="noopener noreferrer">
+              ${cta.label}
+            </a>
+            <div class="divider"></div>
+            <p class="muted" style="margin:0 0 8px 0;">Si el botón no funciona, copiá y pegá este enlace:</p>
+            <a class="link" href="${cta.url}" target="_blank" rel="noopener noreferrer">${cta.url}</a>
+          </div>
+        `
+            : `
+          <div class="ctaWrap">
+            <div class="divider"></div>
+          </div>
+        `
+        }
+
+        <div class="footer">
+          ${finalFooterLines.map((l) => `<div>${l}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+  }
+
+  // ============================================================
+  // EMAIL TEMPLATES (MISMA LÍNEA VISUAL)
+  // ============================================================
 
   private getVerificationEmailTemplate(
     fullName: string,
     verificationUrl: string,
   ): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: linear-gradient(135deg, #F5E6D3 0%, #F8C4D8 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-          .content { background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; }
-          .button { display: inline-block; padding: 12px 30px; background: #F8C4D8; color: #333; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }
-          .footer { background: #f5f5f5; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1 style="color: #333; margin: 0;">¡Bienvenido/a! 🎉</h1>
-          </div>
-          <div class="content">
-            <p>Hola <strong>${fullName}</strong>,</p>
-            <p>Gracias por registrarte. Por favor verifica tu email haciendo click en el botón:</p>
-            
-            <div style="text-align: center;">
-              <a href="${verificationUrl}" class="button">Verificar mi email</a>
-            </div>
-
-            <p>O copia este enlace en tu navegador:</p>
-            <p style="word-break: break-all; color: #666; font-size: 14px;">${verificationUrl}</p>
-
-            <p><strong>Este enlace expira en 24 horas.</strong></p>
-          </div>
-          <div class="footer">
-            <p>${this.configService.get('BUSINESS_NAME') || 'Turnera Médica'}</p>
-            <p>${this.configService.get('BUSINESS_ADDRESS') || ''}</p>
-          </div>
+    return this.getBaseEmailTemplate({
+      preheader: 'Verificá tu email para activar tu cuenta.',
+      title: 'Verificá tu cuenta',
+      greetingName: fullName,
+      variant: 'default',
+      introHtml: `<p class="muted">Gracias por registrarte. Para activar tu cuenta, confirmá tu email.</p>`,
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow" style="margin:0;">Este enlace vence en <strong>24 horas</strong>.</p>
         </div>
-      </body>
-      </html>
-    `;
+      `,
+      cta: { label: 'Verificar email', url: verificationUrl },
+    });
   }
 
   private getPasswordResetEmailTemplate(
     fullName: string,
     resetUrl: string,
   ): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: linear-gradient(135deg, #F5E6D3 0%, #F8C4D8 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-          .content { background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; }
-          .button { display: inline-block; padding: 12px 30px; background: #F8C4D8; color: #333; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }
-          .footer { background: #f5f5f5; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1 style="color: #333; margin: 0;">Recupera tu contraseña 🔐</h1>
-          </div>
-          <div class="content">
-            <p>Hola <strong>${fullName}</strong>,</p>
-            <p>Recibimos una solicitud para restablecer tu contraseña.</p>
-            
-            <div style="text-align: center;">
-              <a href="${resetUrl}" class="button">Restablecer contraseña</a>
-            </div>
-
-            <p>O copia este enlace:</p>
-            <p style="word-break: break-all; color: #666; font-size: 14px;">${resetUrl}</p>
-
-            <p><strong>Este enlace expira en 1 hora.</strong></p>
-            <p>Si no solicitaste este cambio, ignora este email.</p>
-          </div>
-          <div class="footer">
-            <p>${this.configService.get('BUSINESS_NAME') || 'Turnera Médica'}</p>
-          </div>
+    return this.getBaseEmailTemplate({
+      preheader: 'Restablecé tu contraseña de forma segura.',
+      title: 'Restablecer contraseña',
+      greetingName: fullName,
+      variant: 'warning',
+      introHtml: `<p class="muted">Recibimos una solicitud para restablecer tu contraseña.</p>`,
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow" style="margin:0 0 8px 0;">Este enlace vence en <strong>1 hora</strong>.</p>
+          <p class="infoRow muted" style="margin:0;">Si vos no pediste este cambio, podés ignorar este email.</p>
         </div>
-      </body>
-      </html>
-    `;
+      `,
+      cta: { label: 'Restablecer contraseña', url: resetUrl },
+    });
   }
 
-  private getAppointmentConfirmationTemplate(data: any): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: linear-gradient(135deg, #F5E6D3 0%, #F8C4D8 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-          .content { background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; }
-          .info-box { background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0; }
-          .footer { background: #f5f5f5; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1 style="color: #333; margin: 0;">✅ Turno Confirmado</h1>
-          </div>
-          <div class="content">
-            <p>Hola <strong>${data.patientName}</strong>,</p>
-            <p>Tu turno ha sido confirmado con los siguientes datos:</p>
-            
-            <div class="info-box">
-              <p><strong>Servicio:</strong> ${data.serviceName}</p>
-              <p><strong>Fecha:</strong> ${data.date}</p>
-              <p><strong>Hora:</strong> ${data.time}</p>
-              ${data.depositAmount ? `<p><strong>Seña requerida:</strong> $${data.depositAmount}</p>` : ''}
-            </div>
-
-            <p>Te esperamos! 🌸</p>
-          </div>
-          <div class="footer">
-            <p>${this.configService.get('BUSINESS_NAME') || 'Turnera Médica'}</p>
-            <p>${this.configService.get('BUSINESS_PHONE') || ''}</p>
-          </div>
+  private getAppointmentConfirmationTemplate(data: {
+    patientName: string;
+    serviceName: string;
+    date: string;
+    time: string;
+    depositAmount?: number;
+  }): string {
+    return this.getBaseEmailTemplate({
+      preheader: 'Tu turno quedó confirmado.',
+      title: 'Turno confirmado',
+      greetingName: data.patientName,
+      variant: 'success',
+      introHtml: `<p class="muted">Tu turno fue confirmado con los siguientes datos:</p>`,
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+          <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
+          <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
+          ${
+            data.depositAmount
+              ? `<p class="infoRow"><strong>Seña:</strong> $${data.depositAmount}</p>`
+              : ``
+          }
         </div>
-      </body>
-      </html>
-    `;
+        <p style="margin-top:14px;">Te esperamos 🌸</p>
+      `,
+    });
   }
 
-  private getAppointmentReminderTemplate(data: any): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: linear-gradient(135deg, #FFE5B4 0%, #FFD700 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-          .content { background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; }
-          .info-box { background: #fff9e6; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #FFD700; }
-          .footer { background: #f5f5f5; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1 style="color: #333; margin: 0;">⏰ Recordatorio de Turno</h1>
-          </div>
-          <div class="content">
-            <p>Hola <strong>${data.patientName}</strong>,</p>
-            <p>Te recordamos que <strong>mañana</strong> tienes turno:</p>
-            
-            <div class="info-box">
-              <p><strong>Servicio:</strong> ${data.serviceName}</p>
-              <p><strong>Fecha:</strong> ${data.date}</p>
-              <p><strong>Hora:</strong> ${data.time}</p>
-            </div>
-
-            <p>¡Te esperamos! 🌸</p>
-          </div>
-          <div class="footer">
-            <p>${this.configService.get('BUSINESS_NAME') || 'Turnera Médica'}</p>
-          </div>
+  private getAppointmentReminderTemplate(data: {
+    patientName: string;
+    serviceName: string;
+    date: string;
+    time: string;
+  }): string {
+    return this.getBaseEmailTemplate({
+      preheader: 'Recordatorio: tenés un turno pronto.',
+      title: 'Recordatorio de turno',
+      greetingName: data.patientName,
+      variant: 'warning',
+      introHtml: `<p class="muted">Te recordamos que <strong>mañana</strong> tenés turno:</p>`,
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+          <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
+          <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
         </div>
-      </body>
-      </html>
-    `;
+        <p style="margin-top:14px;">Si necesitás reprogramar, hacelo desde la app.</p>
+      `,
+    });
   }
 
-  private getAppointmentCancellationTemplate(data: any): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #ffebee; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-          .content { background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; }
-          .info-box { background: #fff5f5; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f44336; }
-          .footer { background: #f5f5f5; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; font-size: 12px; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1 style="color: #c62828; margin: 0;">❌ Turno Cancelado</h1>
-          </div>
-          <div class="content">
-            <p>Hola <strong>${data.patientName}</strong>,</p>
-            <p>Tu turno ha sido cancelado:</p>
-            
-            <div class="info-box">
-              <p><strong>Servicio:</strong> ${data.serviceName}</p>
-              <p><strong>Fecha:</strong> ${data.date}</p>
-              <p><strong>Hora:</strong> ${data.time}</p>
-              ${data.reason ? `<p><strong>Motivo:</strong> ${data.reason}</p>` : ''}
-            </div>
-
-            <p>Podés reagendar cuando quieras.</p>
-          </div>
-          <div class="footer">
-            <p>${this.configService.get('BUSINESS_NAME') || 'Turnera Médica'}</p>
-          </div>
+  private getAppointmentCancellationTemplate(data: {
+    patientName: string;
+    serviceName: string;
+    date: string;
+    time: string;
+    reason?: string;
+  }): string {
+    return this.getBaseEmailTemplate({
+      preheader: 'Tu turno fue cancelado.',
+      title: 'Turno cancelado',
+      greetingName: data.patientName,
+      variant: 'danger',
+      introHtml: `<p class="muted">Tu turno ha sido cancelado:</p>`,
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+          <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
+          <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
+          ${data.reason ? `<p class="infoRow"><strong>Motivo:</strong> ${data.reason}</p>` : ''}
         </div>
-      </body>
-      </html>
-    `;
+        <p style="margin-top:14px;">Podés reagendar cuando quieras desde la app.</p>
+      `,
+    });
   }
 }
-// ============================================
-// FIN EmailService
-// ============================================

@@ -107,9 +107,9 @@ export class User {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  //   // Relations
-  //   @OneToMany(() => Appointment, (appointment) => appointment.user)
-  //   appointments: Appointment[];
+  // Relations
+  @OneToMany(() => Appointment, (appointment) => appointment.user)
+  appointments: Appointment[];
 
   //   @OneToMany(() => MedicalRecord, (record) => record.user)
   //   medicalRecords: MedicalRecord[];

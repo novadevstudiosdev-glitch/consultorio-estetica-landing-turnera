@@ -16,6 +16,8 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { BlockedSlotsModule } from './modules/blocked-slots/blocked-slots.module';
+import { BusinessHoursModule } from './modules/business-hours/business-hours.module';
 
 @Module({
   imports: [
@@ -51,6 +53,8 @@ import { AppService } from './app.service';
     AppointmentsModule,
     PaymentModule,
     NotificationsModule,
+    BusinessHoursModule,
+    BlockedSlotsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
