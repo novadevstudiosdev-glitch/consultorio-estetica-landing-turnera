@@ -6,6 +6,8 @@ import { PasswordResetToken } from '../modules/users/entities/password-reset-tok
 import { EmailVerificationToken } from '../modules/users/entities/email-verification-token.entity';
 import { Service } from '../modules/services/entities/service.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { BlockedSlot } from '@/modules/blocked-slots/entities/blocked-slot.entity';
+import { BusinessHours } from '@/modules/business-hours/entities/business-hours.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -21,8 +23,9 @@ export const getDatabaseConfig = (
     PasswordResetToken,
     EmailVerificationToken,
     Service,
-    Service,
     Appointment,
+    BusinessHours,
+    BlockedSlot,
     // Agregar más cuando las crees
   ],
   synchronize: configService.get('NODE_ENV') === 'development',

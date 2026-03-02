@@ -11,6 +11,7 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -33,22 +34,27 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { User, UserRole } from '../users/entities/user.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
+import { PaginationDto } from '@/common/dto/pagination.dto';
+import { Public } from '@/common/decorators/public.decorator';
+import { SlotsService } from './slots.service';
 
 @ApiTags('Appointments')
 @Controller('appointments')
 export class AppointmentsController {
-  constructor(private readonly appointmentsService: AppointmentsService) {}
+  constructor(
+    private readonly appointmentsService: AppointmentsService,
+    private readonly slotsService: SlotsService,
+  ) {}
 
-  @Post()
+  @Post('available-slots')
   @UseGuards(OptionalJwtAuthGuard)
-  @ApiBearerAuth() // 👈 ESTO permite que Swagger muestre el candado para enviar token
+  @ApiBearerAuth() // Swagger muestra el candado para enviar token
   @ApiOperation({
     summary: 'Crear un turno (público - opcional con auth)',
     description:
       '🔓 Endpoint público que funciona CON o SIN autenticación.\n\n' +
-      '✅ CON token (Authorization header): El turno se asocia al usuario logueado.\n' +
-      '✅ SIN token: El turno se crea como invitado (userId = null).\n\n' +
-      '💡 En Swagger: Click en el candado 🔒 arriba a la derecha para agregar tu token JWT.',
+      '✅ CON token (Authorization header): El turno se asocia al usuario logueado.\n\n' +
+      '✅ SIN token: El turno se crea como invitado (userId = null).\n\n',
   })
   @ApiResponse({
     status: 201,
@@ -107,14 +113,14 @@ export class AppointmentsController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Lista de turnos' })
   async findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @Query('status') status?: AppointmentStatus,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
   ) {
-    const pageNum = page ? parseInt(page, 10) : 1;
-    const limitNum = limit ? parseInt(limit, 10) : 20;
+    const pageNum = page ? Math.max(1, parseInt(page, 10)) : 1;
+    const limitNum = limit ? Math.max(1, parseInt(limit, 10)) : 20;
 
     return await this.appointmentsService.findAll(
       undefined,
@@ -133,19 +139,15 @@ export class AppointmentsController {
   @ApiResponse({ status: 200, description: 'Lista de turnos del usuario' })
   async getMyAppointments(
     @CurrentUser() user: User,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query() pagination: PaginationDto,
   ) {
-    const pageNum = page ? parseInt(page, 10) : 1;
-    const limitNum = limit ? parseInt(limit, 10) : 20;
-
     return await this.appointmentsService.findAll(
       user.id,
       undefined,
       undefined,
       undefined,
-      pageNum,
-      limitNum,
+      pagination.page,
+      pagination.limit,
     );
   }
 
@@ -164,14 +166,71 @@ export class AppointmentsController {
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Obtener estadísticas de turnos (solo admin)' })
-  @ApiQuery({ name: 'startDate', required: false, type: String })
-  @ApiQuery({ name: 'endDate', required: false, type: String })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    type: String,
+    description: 'Fecha inicio (formato: YYYY-MM-DD, ejemplo: 2025-01-01)',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    type: String,
+    description: 'Fecha fin (formato: YYYY-MM-DD, ejemplo: 2025-12-31)',
+  })
   @ApiResponse({ status: 200, description: 'Estadísticas de turnos' })
   async getStats(
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
     return await this.appointmentsService.getStats(startDate, endDate);
+  }
+
+  @Get('available-slots')
+  @Public()
+  @ApiOperation({
+    summary: 'Obtener horarios disponibles para un servicio (público)',
+    description:
+      'Retorna todos los slots disponibles para un servicio en una fecha específica. Considera horarios de negocio, slots bloqueados y turnos existentes.',
+  })
+  @ApiQuery({
+    name: 'serviceId',
+    required: true,
+    type: String,
+    description: 'ID del servicio',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: true,
+    type: String,
+    description: 'Fecha para consultar disponibilidad (formato YYYY-MM-DD)',
+    example: '2025-03-15',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de slots con disponibilidad',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          time: { type: 'string', example: '14:00' },
+          available: { type: 'boolean', example: true },
+          reason: { type: 'string', example: 'Horario ocupado' },
+        },
+      },
+    },
+  })
+  async getAvailableSlots(
+    @Query('serviceId') serviceId: string,
+    @Query('date') date: string,
+  ) {
+    if (!serviceId || !date) {
+      throw new BadRequestException('serviceId y date son requeridos');
+    }
+
+    return await this.slotsService.getAvailableSlots(serviceId, date);
   }
 
   @Get(':id')

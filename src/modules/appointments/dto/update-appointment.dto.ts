@@ -4,6 +4,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { CreateAppointmentDto } from './create-appointment.dto';
 import {
   AppointmentStatus,
+  PaymentMethod,
   PaymentStatus,
 } from '../entities/appointment.entity';
 
@@ -44,6 +45,25 @@ export class AdminCreateAppointmentDto extends CreateAppointmentDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({
+    enum: PaymentStatus,
+    default: PaymentStatus.PENDING,
+    description:
+      'Estado del pago (admin puede marcar como paid si cobró en efectivo)',
+  })
+  @IsOptional()
+  @IsEnum(PaymentStatus)
+  paymentStatus?: PaymentStatus;
+
+  @ApiPropertyOptional({
+    enum: PaymentMethod,
+    default: PaymentMethod.MANUAL,
+    description: 'Método de pago',
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
 }
 
 // DTO para cancelar turno

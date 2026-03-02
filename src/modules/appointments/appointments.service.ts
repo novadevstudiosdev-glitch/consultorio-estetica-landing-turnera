@@ -6,10 +6,11 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository } from 'typeorm';
 import {
   Appointment,
   AppointmentStatus,
+  PaymentMethod,
   PaymentStatus,
 } from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -18,6 +19,12 @@ import {
   AdminCreateAppointmentDto,
 } from './dto/update-appointment.dto';
 import { ServicesService } from '../services/services.service';
+import {
+  BusinessHours,
+  DayOfWeek,
+} from '../business-hours/entities/business-hours.entity';
+import { BlockedSlot } from '../blocked-slots/entities/blocked-slot.entity';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -26,7 +33,12 @@ export class AppointmentsService {
   constructor(
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
+    @InjectRepository(BusinessHours)
+    private businessHoursRepository: Repository<BusinessHours>,
+    @InjectRepository(BlockedSlot)
+    private blockedSlotsRepository: Repository<BlockedSlot>,
     private servicesService: ServicesService,
+    private emailService: EmailService,
   ) {}
 
   /**
@@ -53,8 +65,17 @@ export class AppointmentsService {
       createAppointmentDto.appointmentTime,
     );
 
-    // TODO: Validar horarios de negocio (Fase 2)
-    // TODO: Validar blocked_slots (Fase 2)
+    // ✅ Validar horarios de negocio
+    await this.validateBusinessHours(
+      createAppointmentDto.appointmentDate,
+      createAppointmentDto.appointmentTime,
+    );
+
+    // ✅ Validar slots bloqueados
+    await this.validateNotBlocked(
+      createAppointmentDto.appointmentDate,
+      createAppointmentDto.appointmentTime,
+    );
 
     // Crear turno
     const appointment = this.appointmentsRepository.create({
@@ -71,7 +92,22 @@ export class AppointmentsService {
       `Turno creado: ${saved.patientName} - ${saved.appointmentDate} ${saved.appointmentTime}`,
     );
 
-    // TODO: Enviar email de confirmación (Fase 3)
+    // ✅ Enviar email de confirmación
+    try {
+      await this.emailService.sendAppointmentConfirmation(saved.patientEmail, {
+        patientName: saved.patientName,
+        serviceName: service.name,
+        date: saved.appointmentDate.toString(),
+        time: saved.appointmentTime,
+        depositAmount: service.depositAmount,
+      });
+
+      saved.confirmationSent = true;
+      await this.appointmentsRepository.save(saved);
+    } catch (error) {
+      this.logger.error('Error enviando email de confirmación:', error);
+      // No fallar si el email no se envía
+    }
 
     return saved;
   }
@@ -84,7 +120,9 @@ export class AppointmentsService {
     adminId: string,
   ): Promise<Appointment> {
     // Verificar que el servicio existe
-    await this.servicesService.findOne(adminCreateDto.serviceId);
+    const service = await this.servicesService.findOne(
+      adminCreateDto.serviceId,
+    );
 
     // Verificar disponibilidad básica
     await this.validateSlotAvailability(
@@ -95,7 +133,8 @@ export class AppointmentsService {
     const appointment = this.appointmentsRepository.create({
       ...adminCreateDto,
       status: AppointmentStatus.CONFIRMED,
-      paymentStatus: PaymentStatus.PENDING,
+      paymentStatus: adminCreateDto.paymentStatus || PaymentStatus.PAID,
+      paymentMethod: adminCreateDto.paymentMethod || PaymentMethod.MANUAL,
       createdByAdmin: true,
     });
 
@@ -104,6 +143,26 @@ export class AppointmentsService {
     this.logger.log(
       `Turno creado por admin: ${saved.patientName} - ${saved.appointmentDate}`,
     );
+
+    // Enviar confirmación si el turno está confirmado
+    if (saved.status === AppointmentStatus.CONFIRMED) {
+      try {
+        await this.emailService.sendAppointmentConfirmation(
+          saved.patientEmail,
+          {
+            patientName: saved.patientName,
+            serviceName: service.name,
+            date: saved.appointmentDate.toString(),
+            time: saved.appointmentTime,
+          },
+        );
+
+        saved.confirmationSent = true;
+        await this.appointmentsRepository.save(saved);
+      } catch (error) {
+        this.logger.error('Error enviando email:', error);
+      }
+    }
 
     return saved;
   }
@@ -129,32 +188,26 @@ export class AppointmentsService {
       .leftJoinAndSelect('appointment.service', 'service')
       .leftJoinAndSelect('appointment.user', 'user');
 
-    // Filtrar por usuario si se especifica
     if (userId) {
       query.andWhere('appointment.userId = :userId', { userId });
     }
 
-    // Filtrar por estado
     if (status) {
       query.andWhere('appointment.status = :status', { status });
     }
 
-    // Filtrar por rango de fechas
-    if (startDate && endDate) {
-      query.andWhere(
-        'appointment.appointmentDate BETWEEN :startDate AND :endDate',
-        {
-          startDate,
-          endDate,
-        },
-      );
+    if (startDate) {
+      query.andWhere('appointment.appointmentDate >= :startDate', {
+        startDate,
+      });
+    }
+    if (endDate) {
+      query.andWhere('appointment.appointmentDate <= :endDate', { endDate });
     }
 
-    // Ordenar por fecha y hora
     query.orderBy('appointment.appointmentDate', 'ASC');
     query.addOrderBy('appointment.appointmentTime', 'ASC');
 
-    // Paginación
     const total = await query.getCount();
     const data = await query
       .skip((page - 1) * limit)
@@ -194,7 +247,6 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appointment = await this.findOne(id);
 
-    // Si cambia fecha/hora, validar disponibilidad
     if (
       updateAppointmentDto.appointmentDate ||
       updateAppointmentDto.appointmentTime
@@ -241,8 +293,24 @@ export class AppointmentsService {
 
     this.logger.log(`Turno cancelado por ${cancelledBy}: ${cancelled.id}`);
 
-    // TODO: Enviar email de cancelación (Fase 3)
-    // TODO: Procesar reembolso si aplica (Fase 3)
+    // ✅ Enviar email de cancelación
+    try {
+      await this.emailService.sendAppointmentCancellation(
+        cancelled.patientEmail,
+        {
+          patientName: cancelled.patientName,
+          serviceName: cancelled.service.name,
+          date: cancelled.appointmentDate.toString(),
+          time: cancelled.appointmentTime,
+          reason: cancellationReason,
+        },
+      );
+    } catch (error) {
+      this.logger.error('Error enviando email de cancelación:', error);
+    }
+
+    // ✅ TODO: Procesar reembolso si aplica
+    // Este se procesa manualmente desde PaymentsController.refund()
 
     return cancelled;
   }
@@ -251,18 +319,22 @@ export class AppointmentsService {
    * Obtener turnos del día
    */
   async getTodayAppointments(): Promise<Appointment[]> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
 
-    return await this.appointmentsRepository.find({
-      where: {
-        appointmentDate: new Date(today) as any,
+    return await this.appointmentsRepository
+      .createQueryBuilder('appointment')
+      .leftJoinAndSelect('appointment.service', 'service')
+      .leftJoinAndSelect('appointment.user', 'user')
+      .where('appointment.appointmentDate = :date', { date: todayStr })
+      .andWhere('appointment.status = :status', {
         status: AppointmentStatus.CONFIRMED,
-      },
-      relations: ['service', 'user'],
-      order: {
-        appointmentTime: 'ASC',
-      },
-    });
+      })
+      .orderBy('appointment.appointmentTime', 'ASC')
+      .getMany();
   }
 
   /**
@@ -281,14 +353,13 @@ export class AppointmentsService {
   }> {
     const query = this.appointmentsRepository.createQueryBuilder('appointment');
 
-    if (startDate && endDate) {
-      query.where(
-        'appointment.appointmentDate BETWEEN :startDate AND :endDate',
-        {
-          startDate,
-          endDate,
-        },
-      );
+    if (startDate) {
+      query.andWhere('appointment.appointmentDate >= :startDate', {
+        startDate,
+      });
+    }
+    if (endDate) {
+      query.andWhere('appointment.appointmentDate <= :endDate', { endDate });
     }
 
     const total = await query.getCount();
@@ -360,5 +431,80 @@ export class AppointmentsService {
         'El horario seleccionado ya está ocupado. Por favor, elija otro horario.',
       );
     }
+  }
+
+  /**
+   * ✅ Validar horarios de negocio (Fase 2)
+   */
+  private async validateBusinessHours(
+    date: string,
+    time: string,
+  ): Promise<void> {
+    const dateObj = new Date(date);
+    const dayOfWeek = this.getDayOfWeek(dateObj);
+
+    const businessHours = await this.businessHoursRepository.findOne({
+      where: {
+        dayOfWeek,
+        isActive: true,
+      },
+    });
+
+    if (!businessHours) {
+      throw new BadRequestException(
+        `No hay horarios de atención configurados para ${dayOfWeek}`,
+      );
+    }
+
+    // Verificar que la hora esté dentro del horario de atención
+    if (time < businessHours.openTime || time >= businessHours.closeTime) {
+      throw new BadRequestException(
+        `El horario seleccionado está fuera del horario de atención (${businessHours.openTime} - ${businessHours.closeTime})`,
+      );
+    }
+  }
+
+  /**
+   * ✅ Validar slots bloqueados (Fase 2)
+   */
+  private async validateNotBlocked(date: string, time: string): Promise<void> {
+    const blockedSlots = await this.blockedSlotsRepository.find({
+      where: {
+        blockedDate: date as any,
+        isActive: true,
+      },
+    });
+
+    for (const blocked of blockedSlots) {
+      // Si no tiene horas específicas, bloquea TODO el día
+      if (!blocked.startTime || !blocked.endTime) {
+        throw new BadRequestException(
+          `El día ${date} está bloqueado: ${blocked.reason || 'No disponible'}`,
+        );
+      }
+
+      // Verificar si el slot está dentro del rango bloqueado
+      if (time >= blocked.startTime && time < blocked.endTime) {
+        throw new BadRequestException(
+          `El horario ${time} está bloqueado: ${blocked.reason || 'No disponible'}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Obtener día de la semana en formato DayOfWeek
+   */
+  private getDayOfWeek(date: Date): DayOfWeek {
+    const days = [
+      DayOfWeek.SUNDAY,
+      DayOfWeek.MONDAY,
+      DayOfWeek.TUESDAY,
+      DayOfWeek.WEDNESDAY,
+      DayOfWeek.THURSDAY,
+      DayOfWeek.FRIDAY,
+      DayOfWeek.SATURDAY,
+    ];
+    return days[date.getDay()];
   }
 }

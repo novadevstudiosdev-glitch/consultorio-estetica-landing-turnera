@@ -138,9 +138,11 @@ export class AuthService {
     }
 
     // Nota: No requerimos email verificado para login, pero el frontend puede manejarlo
-    // if (!user.emailVerified) {
-    //   throw new UnauthorizedException('Por favor, verifica tu email antes de iniciar sesión');
-    // }
+    if (!user.emailVerified) {
+      throw new UnauthorizedException(
+        'Por favor, verifica tu email antes de iniciar sesión',
+      );
+    }
 
     // Generar JWT
     const accessToken = this.generateJwt(user);
