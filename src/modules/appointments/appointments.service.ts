@@ -24,7 +24,7 @@ import {
   DayOfWeek,
 } from '../business-hours/entities/business-hours.entity';
 import { BlockedSlot } from '../blocked-slots/entities/blocked-slot.entity';
-import { EmailService } from '../email/email.service';
+import { EmailService } from '../../common/services/email.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -65,13 +65,13 @@ export class AppointmentsService {
       createAppointmentDto.appointmentTime,
     );
 
-    // ✅ Validar horarios de negocio
+    // Validar horarios de negocio
     await this.validateBusinessHours(
       createAppointmentDto.appointmentDate,
       createAppointmentDto.appointmentTime,
     );
 
-    // ✅ Validar slots bloqueados
+    // Validar slots bloqueados
     await this.validateNotBlocked(
       createAppointmentDto.appointmentDate,
       createAppointmentDto.appointmentTime,
@@ -92,7 +92,7 @@ export class AppointmentsService {
       `Turno creado: ${saved.patientName} - ${saved.appointmentDate} ${saved.appointmentTime}`,
     );
 
-    // ✅ Enviar email de confirmación
+    // Enviar email de confirmación
     try {
       await this.emailService.sendAppointmentConfirmation(saved.patientEmail, {
         patientName: saved.patientName,
@@ -293,7 +293,7 @@ export class AppointmentsService {
 
     this.logger.log(`Turno cancelado por ${cancelledBy}: ${cancelled.id}`);
 
-    // ✅ Enviar email de cancelación
+    // Enviar email de cancelación
     try {
       await this.emailService.sendAppointmentCancellation(
         cancelled.patientEmail,
@@ -309,7 +309,7 @@ export class AppointmentsService {
       this.logger.error('Error enviando email de cancelación:', error);
     }
 
-    // ✅ TODO: Procesar reembolso si aplica
+    // Procesar reembolso si aplica
     // Este se procesa manualmente desde PaymentsController.refund()
 
     return cancelled;
@@ -434,7 +434,7 @@ export class AppointmentsService {
   }
 
   /**
-   * ✅ Validar horarios de negocio (Fase 2)
+   * Validar horarios de negocio (Fase 2)
    */
   private async validateBusinessHours(
     date: string,
@@ -465,7 +465,7 @@ export class AppointmentsService {
   }
 
   /**
-   * ✅ Validar slots bloqueados (Fase 2)
+   * Validar slots bloqueados (Fase 2)
    */
   private async validateNotBlocked(date: string, time: string): Promise<void> {
     const blockedSlots = await this.blockedSlotsRepository.find({
@@ -493,9 +493,19 @@ export class AppointmentsService {
   }
 
   /**
-   * Obtener día de la semana en formato DayOfWeek
+   * Obtener día de la semana (sin conversión de timezone)
    */
-  private getDayOfWeek(date: Date): DayOfWeek {
+  private getDayOfWeek(dateString: string | Date): DayOfWeek {
+    let date: Date;
+
+    if (typeof dateString === 'string') {
+      // Parsear manualmente para evitar conversión UTC
+      const [year, month, day] = dateString.split('-').map(Number);
+      date = new Date(year, month - 1, day);
+    } else {
+      date = dateString;
+    }
+
     const days = [
       DayOfWeek.SUNDAY,
       DayOfWeek.MONDAY,
@@ -505,6 +515,7 @@ export class AppointmentsService {
       DayOfWeek.FRIDAY,
       DayOfWeek.SATURDAY,
     ];
+
     return days[date.getDay()];
   }
 }

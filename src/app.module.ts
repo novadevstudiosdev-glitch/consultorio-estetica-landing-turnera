@@ -12,12 +12,13 @@ import { ServicesModule } from './modules/services/services.module';
 import { ProductsModule } from './modules/products/products.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
-import { PaymentModule } from './modules/payment/payment.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BlockedSlotsModule } from './modules/blocked-slots/blocked-slots.module';
 import { BusinessHoursModule } from './modules/business-hours/business-hours.module';
+import { RemindersModule } from './modules/reminders/reminders.module';
 
 @Module({
   imports: [
@@ -51,10 +52,11 @@ import { BusinessHoursModule } from './modules/business-hours/business-hours.mod
     ProductsModule,
     BrandsModule,
     AppointmentsModule,
-    PaymentModule,
-    NotificationsModule,
     BusinessHoursModule,
     BlockedSlotsModule,
+    NotificationsModule,
+    PaymentsModule,
+    RemindersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
