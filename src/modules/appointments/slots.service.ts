@@ -12,7 +12,7 @@ import {
 } from '../appointments/entities/appointment.entity';
 import { Service } from '../services/entities/service.entity';
 
-export interface TimeSlot {
+interface TimeSlot {
   time: string; // HH:mm
   available: boolean;
   reason?: string; // Si no está disponible, por qué
@@ -40,10 +40,11 @@ export class SlotsService {
     serviceId: string,
     date: string,
   ): Promise<TimeSlot[]> {
-    // 1. Validar fecha
-    const dateObj = new Date(date);
-    if (isNaN(dateObj.getTime())) {
-      throw new BadRequestException('Fecha inválida');
+    // 1. Validar formato de fecha
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException(
+        'Formato de fecha inválido. Use YYYY-MM-DD',
+      );
     }
 
     // 2. Obtener el servicio
@@ -54,8 +55,10 @@ export class SlotsService {
       throw new BadRequestException('Servicio no encontrado');
     }
 
-    // 3. Obtener día de la semana
-    const dayOfWeek = this.getDayOfWeek(dateObj);
+    // 3. Obtener día de la semana SIN timezone conversion
+    const dayOfWeek = this.getDayOfWeekFromString(date);
+
+    this.logger.debug(`📅 Fecha: ${date} -> Día: ${dayOfWeek}`);
 
     // 4. Obtener horarios de negocio
     const businessHours = await this.businessHoursRepository.findOne({
@@ -155,9 +158,15 @@ export class SlotsService {
   }
 
   /**
-   * Obtener día de la semana en formato DayOfWeek
+   * Obtener día de la semana (sin conversión de timezone)
    */
-  private getDayOfWeek(date: Date): DayOfWeek {
+  private getDayOfWeekFromString(dateString: string): DayOfWeek {
+    // Parsear manualmente para evitar conversión UTC
+    const [year, month, day] = dateString.split('-').map(Number);
+
+    // Crear fecha en zona horaria local
+    const date = new Date(year, month - 1, day);
+
     const days = [
       DayOfWeek.SUNDAY,
       DayOfWeek.MONDAY,
@@ -167,6 +176,7 @@ export class SlotsService {
       DayOfWeek.FRIDAY,
       DayOfWeek.SATURDAY,
     ];
+
     return days[date.getDay()];
   }
 
