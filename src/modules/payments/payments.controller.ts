@@ -7,6 +7,8 @@ import {
   UseGuards,
   Param,
   ParseUUIDPipe,
+  Req,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,10 +22,13 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { Request } from 'express';
 
 @ApiTags('Payments')
 @Controller('payments')
 export class PaymentsController {
+  private readonly logger = new Logger(PaymentsController.name);
+
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post('create-preference')
@@ -73,8 +78,21 @@ export class PaymentsController {
       'Mercado Pago envía notificaciones aquí cuando cambia el estado del pago',
   })
   @ApiResponse({ status: 200, description: 'Webhook procesado' })
-  async webhook(@Body() body: any) {
-    await this.paymentsService.processWebhook(body);
+  async webhook(@Req() req: Request, @Body() body?: any) {
+    // Mercado Pago a veces envía el body como query params
+    const webhookData = body || req.query || req.body;
+
+    this.logger.log(`📨 Webhook raw: ${JSON.stringify(webhookData)}`);
+    this.logger.log(`📨 Query params: ${JSON.stringify(req.query)}`);
+    this.logger.log(`📨 Headers: ${JSON.stringify(req.headers)}`);
+
+    // Validar que tengamos datos
+    if (!webhookData || Object.keys(webhookData).length === 0) {
+      this.logger.warn('⚠️ Webhook sin datos');
+      return { status: 'ok', message: 'No data received' };
+    }
+
+    await this.paymentsService.processWebhook(webhookData);
     return { status: 'ok' };
   }
 
