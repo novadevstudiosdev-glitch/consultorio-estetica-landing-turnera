@@ -440,8 +440,7 @@ export class AppointmentsService {
     date: string,
     time: string,
   ): Promise<void> {
-    const dateObj = new Date(date);
-    const dayOfWeek = this.getDayOfWeek(dateObj);
+    const dayOfWeek = this.getDayOfWeek(date);
 
     const businessHours = await this.businessHoursRepository.findOne({
       where: {
@@ -516,6 +515,14 @@ export class AppointmentsService {
       DayOfWeek.SATURDAY,
     ];
 
-    return days[date.getDay()];
+    const dayIndex = date.getDay();
+    const dayName = days[dayIndex];
+
+    // Debug log
+    this.logger.debug(
+      `📅 Fecha: ${typeof dateString === 'string' ? dateString : date.toISOString().split('T')[0]} → Día de la semana: ${dayName} (index: ${dayIndex})`,
+    );
+
+    return dayName;
   }
 }
