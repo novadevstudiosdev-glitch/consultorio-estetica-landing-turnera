@@ -10,6 +10,7 @@ import { MercadoPagoConfig, Preference } from 'mercadopago';
 import type { PreferenceRequest } from 'mercadopago/dist/clients/preference/commonTypes';
 import {
   Appointment,
+  AppointmentStatus,
   PaymentStatus,
   PaymentMethod,
 } from '../appointments/entities/appointment.entity';
@@ -43,7 +44,17 @@ export class PaymentsService {
       return undefined;
     }
 
-    return /^https?:\/\//i.test(url) ? url : `http://${url}`;
+    const normalized = url.replace(/\/+$/, '');
+
+    if (/^https?:\/\//i.test(normalized)) {
+      return normalized;
+    }
+
+    const protocol = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized)
+      ? 'http'
+      : 'https';
+
+    return `${protocol}://${normalized}`;
   }
 
   private isHttpsUrl(url?: string): boolean {
@@ -106,6 +117,16 @@ export class PaymentsService {
     const appointment = await this.appointmentsService.findOne(
       createPaymentDto.appointmentId,
     );
+    const depositAmount = Number(appointment.service?.depositAmount ?? 0);
+    const paymentDescription = appointment.service?.name
+      ? `Reserva de ${appointment.service.name}`
+      : 'Reserva de turno';
+
+    if (!Number.isFinite(depositAmount) || depositAmount <= 0) {
+      throw new BadRequestException(
+        'El turno no tiene una seña válida para cobrar',
+      );
+    }
 
     try {
       const successUrl =
@@ -128,9 +149,9 @@ export class PaymentsService {
         items: [
           {
             id: appointment.id,
-            title: createPaymentDto.description,
+            title: paymentDescription,
             quantity: 1,
-            unit_price: createPaymentDto.amount,
+            unit_price: depositAmount,
             currency_id: 'ARS',
           },
         ],
@@ -214,67 +235,73 @@ export class PaymentsService {
 
     const { type, data } = body;
 
-    if (type === 'payment') {
-      const paymentId = data.id;
-
-      try {
-        // Obtener información del pago
-        const paymentInfo = await this.getPaymentInfo(paymentId);
-
-        if (!paymentInfo) {
-          this.logger.warn(`⚠️ No se pudo obtener info del pago ${paymentId}`);
-          return;
-        }
-
-        // Obtener el turno desde external_reference
-        const appointmentId = paymentInfo.external_reference;
-
-        if (!appointmentId) {
-          this.logger.warn('⚠️ Webhook sin external_reference');
-          return;
-        }
-
-        const appointment =
-          await this.appointmentsService.findOne(appointmentId);
-
-        // Actualizar estado según el status del pago
-        switch (paymentInfo.status) {
-          case 'approved':
-            appointment.paymentStatus = PaymentStatus.PAID;
-            appointment.paymentMethod = PaymentMethod.MP;
-            appointment.paymentId = paymentId.toString();
-            appointment.depositPaid = paymentInfo.transaction_amount;
-            this.logger.log(`✅ Pago aprobado para turno ${appointmentId}`);
-            break;
-
-          case 'pending':
-          case 'in_process':
-            appointment.paymentStatus = PaymentStatus.PENDING;
-            this.logger.log(`⏳ Pago pendiente para turno ${appointmentId}`);
-            break;
-
-          case 'rejected':
-          case 'cancelled':
-            appointment.paymentStatus = PaymentStatus.PENDING;
-            this.logger.log(`❌ Pago rechazado para turno ${appointmentId}`);
-            break;
-
-          case 'refunded':
-            appointment.paymentStatus = PaymentStatus.REFUNDED;
-            this.logger.log(`💸 Pago reembolsado para turno ${appointmentId}`);
-            break;
-        }
-
-        await this.appointmentsRepository.save(appointment);
-
-        // TODO: Enviar email de confirmación si el pago fue aprobado
-      } catch (error) {
-        this.logger.error(
-          `❌ Error procesando webhook para pago ${paymentId}:`,
-          error,
-        );
-      }
+    if (type !== 'payment') {
+      this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
+      return;
     }
+
+    const paymentId = Number(data?.id);
+
+    if (!Number.isFinite(paymentId) || paymentId <= 0) {
+      throw new BadRequestException('Webhook de pago sin data.id válido');
+    }
+
+    // Obtener información del pago
+    const paymentInfo = await this.getPaymentInfo(paymentId);
+
+    if (!paymentInfo) {
+      throw new BadRequestException(
+        `No se pudo obtener info del pago ${paymentId}`,
+      );
+    }
+
+    // Obtener el turno desde external_reference
+    const appointmentId = paymentInfo.external_reference;
+
+    if (!appointmentId) {
+      throw new BadRequestException('Webhook sin external_reference');
+    }
+
+    const appointment = await this.appointmentsService.findOne(appointmentId);
+
+    // Actualizar estado según el status del pago
+    switch (paymentInfo.status) {
+      case 'approved':
+        appointment.status = AppointmentStatus.CONFIRMED;
+        appointment.paymentStatus = PaymentStatus.PAID;
+        appointment.paymentMethod = PaymentMethod.MP;
+        appointment.paymentId = paymentId.toString();
+        appointment.depositPaid = paymentInfo.transaction_amount;
+        this.logger.log(`✅ Pago aprobado para turno ${appointmentId}`);
+        break;
+
+      case 'pending':
+      case 'in_process':
+        appointment.paymentStatus = PaymentStatus.PENDING;
+        this.logger.log(`⏳ Pago pendiente para turno ${appointmentId}`);
+        break;
+
+      case 'rejected':
+      case 'cancelled':
+        appointment.paymentStatus = PaymentStatus.PENDING;
+        this.logger.log(`❌ Pago rechazado para turno ${appointmentId}`);
+        break;
+
+      case 'refunded':
+        appointment.paymentStatus = PaymentStatus.REFUNDED;
+        this.logger.log(`💸 Pago reembolsado para turno ${appointmentId}`);
+        break;
+
+      default:
+        this.logger.warn(
+          `Estado de pago no manejado para turno ${appointmentId}: ${paymentInfo.status}`,
+        );
+        return;
+    }
+
+    await this.appointmentsRepository.save(appointment);
+
+    // TODO: Enviar email de confirmación si el pago fue aprobado
   }
 
   /**
