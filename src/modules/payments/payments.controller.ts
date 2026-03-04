@@ -19,7 +19,9 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { User } from '../users/entities/user.entity';
 
 @ApiTags('Payments')
 @Controller('payments')
@@ -55,13 +57,14 @@ export class PaymentsController {
       appointmentId: string;
       amount: number;
       description: string;
-      payer: {
-        email: string;
-        name: string;
+      payer?: {
+        email?: string;
+        name?: string;
       };
     },
+    @CurrentUser() user: User,
   ) {
-    return await this.paymentsService.createPaymentPreference(body);
+    return await this.paymentsService.createPaymentPreference(body, user);
   }
 
   @Post('webhook')

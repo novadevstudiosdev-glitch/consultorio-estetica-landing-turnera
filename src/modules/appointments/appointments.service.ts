@@ -5,8 +5,10 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThanOrEqual, Repository } from 'typeorm';
 import {
   Appointment,
   AppointmentStatus,
@@ -29,6 +31,7 @@ import { EmailService } from '../../common/services/email.service';
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
+  private static readonly DEFAULT_PENDING_TTL_MINUTES = 15;
 
   constructor(
     @InjectRepository(Appointment)
@@ -37,6 +40,7 @@ export class AppointmentsService {
     private businessHoursRepository: Repository<BusinessHours>,
     @InjectRepository(BlockedSlot)
     private blockedSlotsRepository: Repository<BlockedSlot>,
+    private configService: ConfigService,
     private servicesService: ServicesService,
     private emailService: EmailService,
   ) {}
@@ -48,6 +52,8 @@ export class AppointmentsService {
     createAppointmentDto: CreateAppointmentDto,
     userId?: string,
   ): Promise<Appointment> {
+    await this.cancelExpiredPendingAppointments();
+
     // Verificar que el servicio existe
     const service = await this.servicesService.findOne(
       createAppointmentDto.serviceId,
@@ -404,6 +410,49 @@ export class AppointmentsService {
     };
   }
 
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handlePendingExpirationCron(): Promise<void> {
+    try {
+      await this.cancelExpiredPendingAppointments();
+    } catch (error) {
+      this.logger.error('Error cancelando turnos pendientes vencidos', error);
+    }
+  }
+
+  async cancelExpiredPendingAppointments(): Promise<number> {
+    const expirationCutoff = this.getPendingExpirationCutoff();
+
+    const expiredAppointments = await this.appointmentsRepository.find({
+      where: {
+        status: AppointmentStatus.PENDING,
+        paymentStatus: PaymentStatus.PENDING,
+        createdAt: LessThanOrEqual(expirationCutoff),
+      },
+    });
+
+    if (expiredAppointments.length === 0) {
+      return 0;
+    }
+
+    const now = new Date();
+    const reason = `Reserva vencida automaticamente por falta de pago (${this.getPendingTtlMinutes()} minutos)`;
+
+    for (const appointment of expiredAppointments) {
+      appointment.status = AppointmentStatus.CANCELLED;
+      appointment.cancellationReason = reason;
+      appointment.cancelledBy = 'system';
+      appointment.cancelledAt = now;
+    }
+
+    await this.appointmentsRepository.save(expiredAppointments);
+
+    this.logger.log(
+      `Turnos pendientes vencidos cancelados: ${expiredAppointments.length}`,
+    );
+
+    return expiredAppointments.length;
+  }
+
   /**
    * Validar disponibilidad de slot
    */
@@ -412,13 +461,22 @@ export class AppointmentsService {
     time: string,
     excludeId?: string,
   ): Promise<void> {
+    const pendingExpirationCutoff = this.getPendingExpirationCutoff();
+
     const query = this.appointmentsRepository
       .createQueryBuilder('appointment')
       .where('appointment.appointmentDate = :date', { date })
       .andWhere('appointment.appointmentTime = :time', { time })
       .andWhere('appointment.status != :cancelledStatus', {
         cancelledStatus: AppointmentStatus.CANCELLED,
-      });
+      })
+      .andWhere(
+        '(appointment.status != :pendingStatus OR appointment.createdAt > :pendingExpirationCutoff)',
+        {
+          pendingStatus: AppointmentStatus.PENDING,
+          pendingExpirationCutoff,
+        },
+      );
 
     if (excludeId) {
       query.andWhere('appointment.id != :excludeId', { excludeId });
@@ -456,7 +514,22 @@ export class AppointmentsService {
     }
 
     // Verificar que la hora esté dentro del horario de atención
-    if (time < businessHours.openTime || time >= businessHours.closeTime) {
+    const selectedTimeMinutes = this.timeToMinutes(this.normalizeTime(time));
+    const openTimeMinutes = this.timeToMinutes(businessHours.openTime);
+    const closeTimeMinutes = this.timeToMinutes(businessHours.closeTime);
+
+    if (
+      selectedTimeMinutes === null ||
+      openTimeMinutes === null ||
+      closeTimeMinutes === null
+    ) {
+      throw new BadRequestException('Horario invalido');
+    }
+
+    if (
+      selectedTimeMinutes < openTimeMinutes ||
+      selectedTimeMinutes >= closeTimeMinutes
+    ) {
       throw new BadRequestException(
         `El horario seleccionado está fuera del horario de atención (${businessHours.openTime} - ${businessHours.closeTime})`,
       );
@@ -467,6 +540,12 @@ export class AppointmentsService {
    * Validar slots bloqueados (Fase 2)
    */
   private async validateNotBlocked(date: string, time: string): Promise<void> {
+    const selectedTimeMinutes = this.timeToMinutes(this.normalizeTime(time));
+
+    if (selectedTimeMinutes === null) {
+      throw new BadRequestException('Horario invalido');
+    }
+
     const blockedSlots = await this.blockedSlotsRepository.find({
       where: {
         blockedDate: date as any,
@@ -483,7 +562,17 @@ export class AppointmentsService {
       }
 
       // Verificar si el slot está dentro del rango bloqueado
-      if (time >= blocked.startTime && time < blocked.endTime) {
+      const blockedStartMinutes = this.timeToMinutes(blocked.startTime);
+      const blockedEndMinutes = this.timeToMinutes(blocked.endTime);
+
+      if (blockedStartMinutes === null || blockedEndMinutes === null) {
+        continue;
+      }
+
+      if (
+        selectedTimeMinutes >= blockedStartMinutes &&
+        selectedTimeMinutes < blockedEndMinutes
+      ) {
         throw new BadRequestException(
           `El horario ${time} está bloqueado: ${blocked.reason || 'No disponible'}`,
         );
@@ -493,6 +582,63 @@ export class AppointmentsService {
 
   /**
    * Obtener día de la semana (sin conversión de timezone)
+   */
+  /**
+   * Normalize HH:mm:ss to HH:mm.
+   */
+  private normalizeTime(time?: string): string {
+    if (!time) {
+      return '';
+    }
+
+    const [hours = '', minutes = ''] = time.trim().split(':');
+    return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  }
+
+  private timeToMinutes(time?: string): number | null {
+    if (!time) {
+      return null;
+    }
+
+    const [hoursRaw, minutesRaw] = time.trim().split(':');
+    const hours = Number(hoursRaw);
+    const minutes = Number(minutesRaw);
+
+    if (
+      !Number.isInteger(hours) ||
+      !Number.isInteger(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      return null;
+    }
+
+    return hours * 60 + minutes;
+  }
+
+  private getPendingTtlMinutes(): number {
+    const raw =
+      this.configService.get<string>('PENDING_APPOINTMENT_TTL_MINUTES') ??
+      AppointmentsService.DEFAULT_PENDING_TTL_MINUTES.toString();
+    const parsed = Number(raw);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return AppointmentsService.DEFAULT_PENDING_TTL_MINUTES;
+    }
+
+    return Math.floor(parsed);
+  }
+
+  private getPendingExpirationCutoff(referenceDate: Date = new Date()): Date {
+    return new Date(
+      referenceDate.getTime() - this.getPendingTtlMinutes() * 60 * 1000,
+    );
+  }
+
+  /**
+   * Obtener dÃ­a de la semana (sin conversiÃ³n de timezone)
    */
   private getDayOfWeek(dateString: string | Date): DayOfWeek {
     let date: Date;
