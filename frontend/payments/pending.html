@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⏳ Pago Pendiente</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 500px;
+      width: 100%;
+      padding: 40px;
+      text-align: center;
+    }
+
+    .icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      color: #f093fb;
+      margin-bottom: 15px;
+      font-size: 32px;
+    }
+
+    p {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 30px;
+      font-size: 16px;
+    }
+
+    .info-box {
+      background: #fff9f5;
+      border-left: 4px solid #f5576c;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      text-align: left;
+    }
+
+    .info-box p {
+      margin: 10px 0;
+      font-size: 14px;
+    }
+
+    .info-box strong {
+      color: #f093fb;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 15px 30px;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: transform 0.2s;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">⏳</div>
+    <h1>Pago Pendiente</h1>
+    <p>Tu pago está siendo procesado. Te notificaremos por email cuando se confirme.</p>
+
+    <div class="info-box">
+      <p><strong>¿Qué significa esto?</strong></p>
+      <p>⏰ El pago puede tardar hasta 48 horas</p>
+      <p>📧 Te avisaremos cuando se confirme</p>
+      <p>🔄 Puede ser por transferencia o efectivo</p>
+      <p>✅ No es necesario que hagas nada más</p>
+    </div>
+
+    <a href="test-mercadopago.html" class="btn">Volver al inicio</a>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentId = urlParams.get('payment_id');
+    const status = urlParams.get('status');
+    const externalReference = urlParams.get('external_reference');
+
+    console.log('⏳ Pago pendiente:', { paymentId, status, externalReference });
+  </script>
+</body>
+</html>

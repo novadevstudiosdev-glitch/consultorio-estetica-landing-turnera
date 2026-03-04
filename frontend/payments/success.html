@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>✅ Pago Exitoso</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 500px;
+      width: 100%;
+      padding: 40px;
+      text-align: center;
+    }
+
+    .icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      color: #11998e;
+      margin-bottom: 15px;
+      font-size: 32px;
+    }
+
+    p {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 30px;
+      font-size: 16px;
+    }
+
+    .info-box {
+      background: #f0fff4;
+      border-left: 4px solid #38ef7d;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      text-align: left;
+    }
+
+    .info-box p {
+      margin: 10px 0;
+      font-size: 14px;
+    }
+
+    .info-box strong {
+      color: #11998e;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 15px 30px;
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: transform 0.2s;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">✅</div>
+    <h1>¡Pago Exitoso!</h1>
+    <p>Tu pago ha sido procesado correctamente. En breve recibirás un email de confirmación con los detalles de tu turno.</p>
+
+    <div class="info-box">
+      <p><strong>¿Qué sigue?</strong></p>
+      <p>📧 Revisa tu email para ver la confirmación</p>
+      <p>📅 Te enviaremos recordatorios 24h y 2h antes</p>
+      <p>💬 Si necesitas cancelar, contáctanos</p>
+    </div>
+
+    <a href="test-mercadopago.html" class="btn">Volver al inicio</a>
+  </div>
+
+  <script>
+    // Capturar parámetros de MP
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentId = urlParams.get('payment_id');
+    const status = urlParams.get('status');
+    const externalReference = urlParams.get('external_reference');
+
+    console.log('🎉 Pago exitoso:', { paymentId, status, externalReference });
+  </script>
+</body>
+</html>
