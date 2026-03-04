@@ -46,7 +46,7 @@ export class AppointmentsController {
     private readonly slotsService: SlotsService,
   ) {}
 
-  @Post('available-slots')
+  @Post()
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth() // Swagger muestra el candado para enviar token
   @ApiOperation({

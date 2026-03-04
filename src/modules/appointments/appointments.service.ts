@@ -440,8 +440,7 @@ export class AppointmentsService {
     date: string,
     time: string,
   ): Promise<void> {
-    const dateObj = new Date(date);
-    const dayOfWeek = this.getDayOfWeek(dateObj);
+    const dayOfWeek = this.getDayOfWeek(date);
 
     const businessHours = await this.businessHoursRepository.findOne({
       where: {
