@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
+import type { PreferenceRequest } from 'mercadopago/dist/clients/preference/commonTypes';
 import {
   Appointment,
   PaymentStatus,
@@ -30,15 +31,46 @@ export class PaymentsService {
   private mercadopago: MercadoPagoConfig;
   private preference: Preference;
 
+  private getAccessToken(): string | undefined {
+    return (
+      this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN') ??
+      this.configService.get<string>('MP_ACCESS_TOKEN')
+    );
+  }
+
+  private normalizeBaseUrl(url?: string): string | undefined {
+    if (!url) {
+      return undefined;
+    }
+
+    return /^https?:\/\//i.test(url) ? url : `http://${url}`;
+  }
+
+  private isHttpsUrl(url?: string): boolean {
+    return !!url && /^https:\/\//i.test(url);
+  }
+
+  private getStatementDescriptor(): string | undefined {
+    const rawDescriptor =
+      this.configService.get<string>('MP_STATEMENT_DESCRIPTOR') ?? 'TURNERA';
+
+    const normalized = rawDescriptor
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9 ]/g, '')
+      .trim()
+      .slice(0, 13);
+
+    return normalized || undefined;
+  }
+
   constructor(
     private configService: ConfigService,
     private appointmentsService: AppointmentsService,
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
   ) {
-    const accessToken = this.configService.get<string>(
-      'MERCADOPAGO_ACCESS_TOKEN',
-    );
+    const accessToken = this.getAccessToken();
 
     if (!accessToken) {
       this.logger.warn(
@@ -76,7 +108,23 @@ export class PaymentsService {
     );
 
     try {
-      const preferenceData = {
+      const successUrl =
+        this.configService.get<string>('MP_SUCCESS_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/success.html`;
+      const failureUrl =
+        this.configService.get<string>('MP_FAILURE_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/failure.html`;
+      const pendingUrl =
+        this.configService.get<string>('MP_PENDING_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/pending.html`;
+      const notificationUrl = `${this.normalizeBaseUrl(this.configService.get('BACKEND_URL'))}/${this.configService.get('API_PREFIX') || 'api'}/payments/webhook`;
+      const hasHttpsBackUrls =
+        this.isHttpsUrl(successUrl) &&
+        this.isHttpsUrl(failureUrl) &&
+        this.isHttpsUrl(pendingUrl);
+      const hasHttpsNotificationUrl = this.isHttpsUrl(notificationUrl);
+      const statementDescriptor = this.getStatementDescriptor();
+      const preferenceData: PreferenceRequest = {
         items: [
           {
             id: appointment.id,
@@ -90,20 +138,37 @@ export class PaymentsService {
           name: createPaymentDto.payer.name,
           email: createPaymentDto.payer.email,
         },
-        back_urls: {
-          success: `${this.configService.get('FRONTEND_URL')}/payment/success`,
-          failure: `${this.configService.get('FRONTEND_URL')}/payment/failure`,
-          pending: `${this.configService.get('FRONTEND_URL')}/payment/pending`,
-        },
-        auto_return: 'approved' as const,
-        notification_url: `${this.configService.get('BACKEND_URL')}/api/v1/payments/webhook`,
         external_reference: appointment.id, // Para identificar el turno en el webhook
-        statement_descriptor: 'TURNERA MEDICA',
         metadata: {
           appointment_id: appointment.id,
           patient_name: appointment.patientName,
         },
       };
+
+      if (hasHttpsBackUrls) {
+        preferenceData.back_urls = {
+          success: successUrl,
+          failure: failureUrl,
+          pending: pendingUrl,
+        };
+        preferenceData.auto_return = 'approved';
+      } else {
+        this.logger.warn(
+          'Mercado Pago requiere back_urls HTTPS desde el 2025-03-29. Se omiten para testing local.',
+        );
+      }
+
+      if (hasHttpsNotificationUrl) {
+        preferenceData.notification_url = notificationUrl;
+      } else {
+        this.logger.warn(
+          'Mercado Pago requiere notification_url HTTPS desde el 2025-03-29. Se omite para testing local.',
+        );
+      }
+
+      if (statementDescriptor) {
+        preferenceData.statement_descriptor = statementDescriptor;
+      }
 
       const response = await this.preference.create({ body: preferenceData });
 
@@ -117,8 +182,27 @@ export class PaymentsService {
         sandboxInitPoint: response.sandbox_init_point!,
       };
     } catch (error) {
-      this.logger.error('❌ Error creando preferencia de pago:', error);
-      throw new BadRequestException('Error al crear preferencia de pago');
+      const mpError = error as any;
+
+      this.logger.error('❌ Error creando preferencia de pago:', mpError);
+      const mpMessage =
+        mpError?.message ||
+        mpError?.cause?.message ||
+        mpError?.error ||
+        mpError?.api_response?.status;
+      const mpCause =
+        mpError?.cause?.length && Array.isArray(mpError.cause)
+          ? mpError.cause
+              .map((cause: any) => cause.description || cause.code)
+              .join('; ')
+          : undefined;
+      const details = [mpMessage, mpCause].filter(Boolean).join(' - ');
+
+      throw new BadRequestException(
+        details
+          ? `Error al crear preferencia de pago: ${details}`
+          : 'Error al crear preferencia de pago',
+      );
     }
   }
 
@@ -202,7 +286,7 @@ export class PaymentsService {
         `https://api.mercadopago.com/v1/payments/${paymentId}`,
         {
           headers: {
-            Authorization: `Bearer ${this.configService.get('MERCADOPAGO_ACCESS_TOKEN')}`,
+            Authorization: `Bearer ${this.getAccessToken()}`,
           },
         },
       );
@@ -241,7 +325,7 @@ export class PaymentsService {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.configService.get('MERCADOPAGO_ACCESS_TOKEN')}`,
+            Authorization: `Bearer ${this.getAccessToken()}`,
           },
           body: JSON.stringify({
             amount: appointment.depositPaid,

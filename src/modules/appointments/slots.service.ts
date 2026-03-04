@@ -12,7 +12,7 @@ import {
 } from '../appointments/entities/appointment.entity';
 import { Service } from '../services/entities/service.entity';
 
-interface TimeSlot {
+export interface TimeSlot {
   time: string; // HH:mm
   available: boolean;
   reason?: string; // Si no está disponible, por qué
