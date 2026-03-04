@@ -248,7 +248,10 @@ export class PaymentsService {
       );
 
       const response = await this.preference.create({ body: preferenceData });
-      const checkoutUrl = response.init_point ?? response.sandbox_init_point;
+      const isTestMode = this.isTestAccessToken(accessToken);
+      const checkoutUrl = isTestMode
+        ? response.sandbox_init_point ?? response.init_point
+        : response.init_point ?? response.sandbox_init_point;
 
       if (!response.id || !checkoutUrl) {
         this.logger.error(
@@ -269,6 +272,7 @@ export class PaymentsService {
           preferenceId: response.id,
           initPoint: response.init_point,
           sandboxInitPoint: response.sandbox_init_point,
+          checkoutUrl,
         })}`,
       );
 
