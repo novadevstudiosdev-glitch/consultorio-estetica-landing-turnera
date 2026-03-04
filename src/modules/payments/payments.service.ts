@@ -1,7 +1,3 @@
-// PRIMERO: Instalar SDK de Mercado Pago
-// npm install mercadopago
-
-// src/modules/payments/payments.service.ts
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,6 +6,7 @@ import { MercadoPagoConfig, Preference } from 'mercadopago';
 import type { PreferenceRequest } from 'mercadopago/dist/clients/preference/commonTypes';
 import {
   Appointment,
+  AppointmentStatus,
   PaymentStatus,
   PaymentMethod,
 } from '../appointments/entities/appointment.entity';
@@ -31,6 +28,33 @@ export class PaymentsService {
   private mercadopago: MercadoPagoConfig;
   private preference: Preference;
 
+  constructor(
+    private configService: ConfigService,
+    private appointmentsService: AppointmentsService,
+    @InjectRepository(Appointment)
+    private appointmentsRepository: Repository<Appointment>,
+  ) {
+    const accessToken = this.getAccessToken();
+
+    if (!accessToken) {
+      this.logger.warn(
+        'MERCADOPAGO_ACCESS_TOKEN no configurado. Pagos deshabilitados.',
+      );
+      return;
+    }
+
+    try {
+      this.mercadopago = new MercadoPagoConfig({
+        accessToken,
+        options: { timeout: 5000 },
+      });
+      this.preference = new Preference(this.mercadopago);
+      this.logger.log('Mercado Pago inicializado correctamente');
+    } catch (error) {
+      this.logger.error('Error inicializando Mercado Pago', error);
+    }
+  }
+
   private getAccessToken(): string | undefined {
     return (
       this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN') ??
@@ -38,12 +62,30 @@ export class PaymentsService {
     );
   }
 
+  private isTestAccessToken(accessToken?: string): boolean {
+    return /^TEST-/i.test(accessToken ?? '');
+  }
+
+  private isTestPayerEmail(email?: string): boolean {
+    return /@testuser\.com$/i.test(email ?? '');
+  }
+
   private normalizeBaseUrl(url?: string): string | undefined {
     if (!url) {
       return undefined;
     }
 
-    return /^https?:\/\//i.test(url) ? url : `http://${url}`;
+    const normalized = url.replace(/\/+$/, '');
+
+    if (/^https?:\/\//i.test(normalized)) {
+      return normalized;
+    }
+
+    const protocol = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized)
+      ? 'http'
+      : 'https';
+
+    return `${protocol}://${normalized}`;
   }
 
   private isHttpsUrl(url?: string): boolean {
@@ -64,48 +106,59 @@ export class PaymentsService {
     return normalized || undefined;
   }
 
-  constructor(
-    private configService: ConfigService,
-    private appointmentsService: AppointmentsService,
-    @InjectRepository(Appointment)
-    private appointmentsRepository: Repository<Appointment>,
-  ) {
-    const accessToken = this.getAccessToken();
+  private getMercadoPagoErrorDetails(error: unknown): string {
+    const mpError = error as any;
+    const apiResponse = mpError?.api_response;
+    const apiData = apiResponse?.data;
+    const apiCause = Array.isArray(apiData?.cause)
+      ? apiData.cause
+          .map((cause: any) => cause?.description || cause?.code)
+          .filter(Boolean)
+          .join('; ')
+      : undefined;
+    const sdkCause = Array.isArray(mpError?.cause)
+      ? mpError.cause
+          .map((cause: any) => cause?.description || cause?.code || cause)
+          .filter(Boolean)
+          .join('; ')
+      : undefined;
 
-    if (!accessToken) {
-      this.logger.warn(
-        '⚠️ MERCADOPAGO_ACCESS_TOKEN no configurado. Pagos deshabilitados.',
-      );
-      return;
-    }
-
-    try {
-      this.mercadopago = new MercadoPagoConfig({
-        accessToken,
-        options: { timeout: 5000 },
-      });
-      this.preference = new Preference(this.mercadopago);
-      this.logger.log('✅ Mercado Pago inicializado correctamente');
-    } catch (error) {
-      this.logger.error('❌ Error inicializando Mercado Pago:', error);
-    }
+    return [
+      apiData?.message,
+      apiData?.error,
+      apiCause,
+      mpError?.message,
+      sdkCause,
+      apiResponse?.status ? `HTTP ${apiResponse.status}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(' - ');
   }
 
-  /**
-   * Crear preferencia de pago para un turno
-   */
   async createPaymentPreference(createPaymentDto: CreatePaymentDto): Promise<{
     preferenceId: string;
     initPoint: string;
     sandboxInitPoint: string;
+    checkoutUrl: string;
   }> {
     if (!this.preference) {
-      throw new BadRequestException('Mercado Pago no está configurado');
+      throw new BadRequestException('Mercado Pago no esta configurado');
     }
 
+    const accessToken = this.getAccessToken();
     const appointment = await this.appointmentsService.findOne(
       createPaymentDto.appointmentId,
     );
+    const depositAmount = Number(appointment.service?.depositAmount ?? 0);
+    const paymentDescription = appointment.service?.name
+      ? `Reserva de ${appointment.service.name}`
+      : 'Reserva de turno';
+
+    if (!Number.isFinite(depositAmount) || depositAmount <= 0) {
+      throw new BadRequestException(
+        'El turno no tiene una sena valida para cobrar',
+      );
+    }
 
     try {
       const successUrl =
@@ -128,22 +181,32 @@ export class PaymentsService {
         items: [
           {
             id: appointment.id,
-            title: createPaymentDto.description,
+            title: paymentDescription,
             quantity: 1,
-            unit_price: createPaymentDto.amount,
+            unit_price: depositAmount,
             currency_id: 'ARS',
           },
         ],
-        payer: {
-          name: createPaymentDto.payer.name,
-          email: createPaymentDto.payer.email,
-        },
-        external_reference: appointment.id, // Para identificar el turno en el webhook
+        external_reference: appointment.id,
         metadata: {
           appointment_id: appointment.id,
           patient_name: appointment.patientName,
         },
       };
+
+      if (
+        !this.isTestAccessToken(accessToken) ||
+        this.isTestPayerEmail(createPaymentDto.payer.email)
+      ) {
+        preferenceData.payer = {
+          name: createPaymentDto.payer.name,
+          email: createPaymentDto.payer.email,
+        };
+      } else {
+        this.logger.warn(
+          `Modo TEST con payer.email no valido para pruebas (${createPaymentDto.payer.email}). Se omite payer para evitar errores de checkout.`,
+        );
+      }
 
       if (hasHttpsBackUrls) {
         preferenceData.back_urls = {
@@ -154,7 +217,7 @@ export class PaymentsService {
         preferenceData.auto_return = 'approved';
       } else {
         this.logger.warn(
-          'Mercado Pago requiere back_urls HTTPS desde el 2025-03-29. Se omiten para testing local.',
+          'Mercado Pago requiere back_urls HTTPS. Se omiten en este entorno.',
         );
       }
 
@@ -162,7 +225,7 @@ export class PaymentsService {
         preferenceData.notification_url = notificationUrl;
       } else {
         this.logger.warn(
-          'Mercado Pago requiere notification_url HTTPS desde el 2025-03-29. Se omite para testing local.',
+          'Mercado Pago requiere notification_url HTTPS. Se omite en este entorno.',
         );
       }
 
@@ -170,33 +233,61 @@ export class PaymentsService {
         preferenceData.statement_descriptor = statementDescriptor;
       }
 
+      this.logger.log(
+        `Creando preferencia MP: ${JSON.stringify({
+          appointmentId: appointment.id,
+          depositAmount,
+          paymentDescription,
+          payerEmail: preferenceData.payer?.email ?? null,
+          successUrl,
+          failureUrl,
+          pendingUrl,
+          notificationUrl: hasHttpsNotificationUrl ? notificationUrl : null,
+          isTestMode: this.isTestAccessToken(accessToken),
+        })}`,
+      );
+
       const response = await this.preference.create({ body: preferenceData });
+      const isTestMode = this.isTestAccessToken(accessToken);
+      const checkoutUrl = isTestMode
+        ? response.sandbox_init_point ?? response.init_point
+        : response.init_point ?? response.sandbox_init_point;
+
+      if (!response.id || !checkoutUrl) {
+        this.logger.error(
+          `Mercado Pago devolvio una preferencia incompleta: ${JSON.stringify({
+            id: response.id,
+            initPoint: response.init_point,
+            sandboxInitPoint: response.sandbox_init_point,
+          })}`,
+        );
+        throw new BadRequestException(
+          'Mercado Pago devolvio una preferencia sin URL de checkout',
+        );
+      }
 
       this.logger.log(
-        `💰 Preferencia creada para turno ${appointment.id}: ${response.id}`,
+        `Preferencia MP creada: ${JSON.stringify({
+          appointmentId: appointment.id,
+          preferenceId: response.id,
+          initPoint: response.init_point,
+          sandboxInitPoint: response.sandbox_init_point,
+          checkoutUrl,
+        })}`,
       );
 
       return {
-        preferenceId: response.id!,
-        initPoint: response.init_point!,
-        sandboxInitPoint: response.sandbox_init_point!,
+        preferenceId: response.id,
+        initPoint: response.init_point ?? '',
+        sandboxInitPoint: response.sandbox_init_point ?? '',
+        checkoutUrl,
       };
     } catch (error) {
-      const mpError = error as any;
+      const details = this.getMercadoPagoErrorDetails(error);
 
-      this.logger.error('❌ Error creando preferencia de pago:', mpError);
-      const mpMessage =
-        mpError?.message ||
-        mpError?.cause?.message ||
-        mpError?.error ||
-        mpError?.api_response?.status;
-      const mpCause =
-        mpError?.cause?.length && Array.isArray(mpError.cause)
-          ? mpError.cause
-              .map((cause: any) => cause.description || cause.code)
-              .join('; ')
-          : undefined;
-      const details = [mpMessage, mpCause].filter(Boolean).join(' - ');
+      this.logger.error(
+        `Error creando preferencia de pago para turno ${appointment.id}: ${details || 'sin detalle'}`,
+      );
 
       throw new BadRequestException(
         details
@@ -206,80 +297,75 @@ export class PaymentsService {
     }
   }
 
-  /**
-   * Procesar webhook de Mercado Pago
-   */
   async processWebhook(body: any): Promise<void> {
-    this.logger.log(`📨 Webhook recibido: ${JSON.stringify(body)}`);
+    this.logger.log(`Webhook recibido: ${JSON.stringify(body)}`);
 
     const { type, data } = body;
 
-    if (type === 'payment') {
-      const paymentId = data.id;
-
-      try {
-        // Obtener información del pago
-        const paymentInfo = await this.getPaymentInfo(paymentId);
-
-        if (!paymentInfo) {
-          this.logger.warn(`⚠️ No se pudo obtener info del pago ${paymentId}`);
-          return;
-        }
-
-        // Obtener el turno desde external_reference
-        const appointmentId = paymentInfo.external_reference;
-
-        if (!appointmentId) {
-          this.logger.warn('⚠️ Webhook sin external_reference');
-          return;
-        }
-
-        const appointment =
-          await this.appointmentsService.findOne(appointmentId);
-
-        // Actualizar estado según el status del pago
-        switch (paymentInfo.status) {
-          case 'approved':
-            appointment.paymentStatus = PaymentStatus.PAID;
-            appointment.paymentMethod = PaymentMethod.MP;
-            appointment.paymentId = paymentId.toString();
-            appointment.depositPaid = paymentInfo.transaction_amount;
-            this.logger.log(`✅ Pago aprobado para turno ${appointmentId}`);
-            break;
-
-          case 'pending':
-          case 'in_process':
-            appointment.paymentStatus = PaymentStatus.PENDING;
-            this.logger.log(`⏳ Pago pendiente para turno ${appointmentId}`);
-            break;
-
-          case 'rejected':
-          case 'cancelled':
-            appointment.paymentStatus = PaymentStatus.PENDING;
-            this.logger.log(`❌ Pago rechazado para turno ${appointmentId}`);
-            break;
-
-          case 'refunded':
-            appointment.paymentStatus = PaymentStatus.REFUNDED;
-            this.logger.log(`💸 Pago reembolsado para turno ${appointmentId}`);
-            break;
-        }
-
-        await this.appointmentsRepository.save(appointment);
-
-        // TODO: Enviar email de confirmación si el pago fue aprobado
-      } catch (error) {
-        this.logger.error(
-          `❌ Error procesando webhook para pago ${paymentId}:`,
-          error,
-        );
-      }
+    if (type !== 'payment') {
+      this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
+      return;
     }
+
+    const paymentId = Number(data?.id);
+
+    if (!Number.isFinite(paymentId) || paymentId <= 0) {
+      throw new BadRequestException('Webhook de pago sin data.id valido');
+    }
+
+    const paymentInfo = await this.getPaymentInfo(paymentId);
+
+    if (!paymentInfo) {
+      throw new BadRequestException(
+        `No se pudo obtener info del pago ${paymentId}`,
+      );
+    }
+
+    const appointmentId = paymentInfo.external_reference;
+
+    if (!appointmentId) {
+      throw new BadRequestException('Webhook sin external_reference');
+    }
+
+    const appointment = await this.appointmentsService.findOne(appointmentId);
+
+    switch (paymentInfo.status) {
+      case 'approved':
+        appointment.status = AppointmentStatus.CONFIRMED;
+        appointment.paymentStatus = PaymentStatus.PAID;
+        appointment.paymentMethod = PaymentMethod.MP;
+        appointment.paymentId = paymentId.toString();
+        appointment.depositPaid = paymentInfo.transaction_amount;
+        this.logger.log(`Pago aprobado para turno ${appointmentId}`);
+        break;
+
+      case 'pending':
+      case 'in_process':
+        appointment.paymentStatus = PaymentStatus.PENDING;
+        this.logger.log(`Pago pendiente para turno ${appointmentId}`);
+        break;
+
+      case 'rejected':
+      case 'cancelled':
+        appointment.paymentStatus = PaymentStatus.PENDING;
+        this.logger.log(`Pago rechazado para turno ${appointmentId}`);
+        break;
+
+      case 'refunded':
+        appointment.paymentStatus = PaymentStatus.REFUNDED;
+        this.logger.log(`Pago reembolsado para turno ${appointmentId}`);
+        break;
+
+      default:
+        this.logger.warn(
+          `Estado de pago no manejado para turno ${appointmentId}: ${paymentInfo.status}`,
+        );
+        return;
+    }
+
+    await this.appointmentsRepository.save(appointment);
   }
 
-  /**
-   * Obtener información de un pago
-   */
   private async getPaymentInfo(paymentId: number): Promise<any> {
     try {
       const response = await fetch(
@@ -292,19 +378,19 @@ export class PaymentsService {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorBody = await response.text();
+        throw new Error(
+          `HTTP ${response.status} al consultar pago ${paymentId}: ${errorBody}`,
+        );
       }
 
       return await response.json();
     } catch (error) {
-      this.logger.error('Error obteniendo info de pago:', error);
+      this.logger.error('Error obteniendo info de pago', error);
       return null;
     }
   }
 
-  /**
-   * Procesar reembolso
-   */
   async refundPayment(appointmentId: string, reason?: string): Promise<void> {
     const appointment = await this.appointmentsService.findOne(appointmentId);
 
@@ -335,15 +421,18 @@ export class PaymentsService {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorBody = await response.text();
+        throw new Error(
+          `HTTP ${response.status} al reembolsar pago ${appointment.paymentId}: ${errorBody}`,
+        );
       }
 
       appointment.paymentStatus = PaymentStatus.REFUNDED;
       await this.appointmentsRepository.save(appointment);
 
-      this.logger.log(`💸 Reembolso procesado para turno ${appointmentId}`);
+      this.logger.log(`Reembolso procesado para turno ${appointmentId}`);
     } catch (error) {
-      this.logger.error('❌ Error procesando reembolso:', error);
+      this.logger.error('Error procesando reembolso', error);
       throw new BadRequestException('Error al procesar reembolso');
     }
   }
