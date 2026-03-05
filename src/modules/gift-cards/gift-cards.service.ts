@@ -12,7 +12,7 @@ import {
   RedeemGiftCardDto,
   UpdateGiftCardDto,
 } from './dto/gift-card.dto';
-import { EmailService } from '../email/email.service';
+import { EmailService } from '../../common/services/email.service';
 
 @Injectable()
 export class GiftCardsService {
@@ -86,7 +86,7 @@ export class GiftCardsService {
 
     if (paymentStatus === 'approved') {
       const now = new Date();
-      
+
       giftCard.status = GiftCardStatus.ACTIVE;
       giftCard.paymentId = paymentId;
       giftCard.paymentStatus = paymentStatus;
@@ -97,17 +97,14 @@ export class GiftCardsService {
 
       // Enviar email con la gift card
       try {
-        await this.emailService.sendGiftCardEmail(
-          giftCard.recipientEmail,
-          {
-            recipientName: giftCard.recipientName,
-            code: giftCard.code,
-            amount: giftCard.amount,
-            expirationDate: giftCard.expirationDate!.toISOString().split('T')[0],
-            purchaserName: giftCard.purchaserName,
-            personalMessage: giftCard.personalMessage,
-          },
-        );
+        await this.emailService.sendGiftCardEmail(giftCard.recipientEmail, {
+          recipientName: giftCard.recipientName,
+          code: giftCard.code,
+          amount: giftCard.amount,
+          expirationDate: giftCard.expirationDate!.toISOString().split('T')[0],
+          purchaserName: giftCard.purchaserName,
+          personalMessage: giftCard.personalMessage,
+        });
 
         this.logger.log(`📧 Gift Card enviada a ${giftCard.recipientEmail}`);
       } catch (error) {
@@ -196,7 +193,10 @@ export class GiftCardsService {
       }
 
       // Verificar estado
-      if (giftCard.status === GiftCardStatus.ACTIVE && giftCard.remainingAmount > 0) {
+      if (
+        giftCard.status === GiftCardStatus.ACTIVE &&
+        giftCard.remainingAmount > 0
+      ) {
         return {
           valid: true,
           giftCard,
@@ -237,7 +237,9 @@ export class GiftCardsService {
 
     // Validaciones
     if (giftCard.status !== GiftCardStatus.ACTIVE) {
-      throw new BadRequestException(`No se puede canjear - Estado: ${giftCard.status}`);
+      throw new BadRequestException(
+        `No se puede canjear - Estado: ${giftCard.status}`,
+      );
     }
 
     if (giftCard.expirationDate && new Date() > giftCard.expirationDate) {
@@ -332,7 +334,8 @@ export class GiftCardsService {
     const stats = {
       total: all.length,
       active: all.filter((gc) => gc.status === GiftCardStatus.ACTIVE).length,
-      redeemed: all.filter((gc) => gc.status === GiftCardStatus.REDEEMED).length,
+      redeemed: all.filter((gc) => gc.status === GiftCardStatus.REDEEMED)
+        .length,
       expired: all.filter((gc) => gc.status === GiftCardStatus.EXPIRED).length,
       totalAmount: all.reduce((sum, gc) => sum + Number(gc.amount), 0),
       totalRedeemed: all
