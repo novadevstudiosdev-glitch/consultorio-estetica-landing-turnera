@@ -11,6 +11,8 @@ import {
   PaymentMethod,
 } from '../appointments/entities/appointment.entity';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { GiftCardsService } from '../gift-cards/gift-cards.service';
+import { GiftCardStatus } from '../gift-cards/entities/gift-card.entity';
 import { User } from '../users/entities/user.entity';
 
 interface CreatePaymentDto {
@@ -33,6 +35,7 @@ export class PaymentsService {
   constructor(
     private configService: ConfigService,
     private appointmentsService: AppointmentsService,
+    private giftCardsService: GiftCardsService,
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
   ) {
@@ -216,6 +219,7 @@ export class PaymentsService {
         ],
         external_reference: appointment.id,
         metadata: {
+          type: 'appointment',
           appointment_id: appointment.id,
           patient_name: appointment.patientName,
         },
@@ -359,6 +363,125 @@ export class PaymentsService {
     }
   }
 
+  // Crear preferencia para gift card
+  async createGiftCardPaymentPreference(giftCardId: string): Promise<{
+    preferenceId: string;
+    initPoint: string;
+    sandboxInitPoint: string;
+    checkoutUrl: string;
+  }> {
+    if (!this.preference) {
+      throw new BadRequestException('Mercado Pago no está configurado');
+    }
+
+    const giftCard = await this.giftCardsService.findOne(giftCardId);
+
+    if (giftCard.status !== GiftCardStatus.PENDING) {
+      throw new BadRequestException('Esta gift card ya fue procesada');
+    }
+
+    try {
+      const successUrl =
+        this.configService.get<string>('MP_SUCCESS_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/success.html`;
+      const failureUrl =
+        this.configService.get<string>('MP_FAILURE_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/failure.html`;
+      const pendingUrl =
+        this.configService.get<string>('MP_PENDING_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/pending.html`;
+      const notificationUrl = `${this.normalizeBaseUrl(this.configService.get('BACKEND_URL'))}/${this.configService.get('API_PREFIX') || 'api'}/payments/webhook`;
+
+      const hasHttpsBackUrls =
+        this.isHttpsUrl(successUrl) &&
+        this.isHttpsUrl(failureUrl) &&
+        this.isHttpsUrl(pendingUrl);
+      const hasHttpsNotificationUrl = this.isHttpsUrl(notificationUrl);
+      const statementDescriptor = this.getStatementDescriptor();
+      const accessToken = this.getAccessToken();
+
+      const preferenceData: PreferenceRequest = {
+        items: [
+          {
+            id: giftCard.id,
+            title: `Gift Card - $${giftCard.amount}`,
+            quantity: 1,
+            unit_price: giftCard.amount,
+            currency_id: 'ARS',
+          },
+        ],
+        payer: {
+          name: giftCard.purchaserName,
+          email: giftCard.purchaserEmail,
+        },
+        external_reference: giftCard.id,
+        metadata: {
+          type: 'gift_card',
+          gift_card_id: giftCard.id,
+          code: giftCard.code,
+          recipient_name: giftCard.recipientName,
+          recipient_email: giftCard.recipientEmail,
+        },
+      };
+
+      if (hasHttpsBackUrls) {
+        preferenceData.back_urls = {
+          success: successUrl,
+          failure: failureUrl,
+          pending: pendingUrl,
+        };
+        preferenceData.auto_return = 'approved';
+      } else {
+        this.logger.warn(
+          'Mercado Pago requiere back_urls HTTPS. Se omiten para testing local.',
+        );
+      }
+
+      if (hasHttpsNotificationUrl) {
+        preferenceData.notification_url = notificationUrl;
+      } else {
+        this.logger.warn(
+          'Mercado Pago requiere notification_url HTTPS. Se omite para testing local.',
+        );
+      }
+
+      if (statementDescriptor) {
+        preferenceData.statement_descriptor = statementDescriptor;
+      }
+
+      const response = await this.preference.create({ body: preferenceData });
+      const isTestMode = this.isTestAccessToken(accessToken);
+      const checkoutUrl = isTestMode
+        ? (response.sandbox_init_point ?? response.init_point)
+        : (response.init_point ?? response.sandbox_init_point);
+
+      this.logger.log(
+        `💰 Preferencia MP creada para Gift Card ${giftCard.code}: ${response.id}`,
+      );
+
+      return {
+        preferenceId: response.id!,
+        initPoint: response.init_point ?? '',
+        sandboxInitPoint: response.sandbox_init_point ?? '',
+        checkoutUrl: checkoutUrl!,
+      };
+    } catch (error) {
+      const details = this.getMercadoPagoErrorDetails(error);
+
+      this.logger.error(
+        `Error creando preferencia de pago para gift card:`,
+        error,
+      );
+
+      throw new BadRequestException(
+        details
+          ? `Error al crear preferencia de pago: ${details}`
+          : 'Error al crear preferencia de pago',
+      );
+    }
+  }
+
+  // Webhook maneja appointments Y gift cards
   async processWebhook(body: any): Promise<void> {
     this.logger.log(`Webhook recibido: ${JSON.stringify(body)}`);
 
@@ -383,12 +506,31 @@ export class PaymentsService {
       );
     }
 
-    const appointmentId = paymentInfo.external_reference;
+    const referenceId = paymentInfo.external_reference;
+    const metadata = paymentInfo.metadata;
 
-    if (!appointmentId) {
+    if (!referenceId) {
       throw new BadRequestException('Webhook sin external_reference');
     }
 
+    // Determinar si es appointment o gift card
+    const isGiftCard = metadata?.type === 'gift_card';
+
+    if (isGiftCard) {
+      // Procesar pago de gift card
+      await this.processGiftCardPayment(referenceId, paymentId, paymentInfo);
+    } else {
+      // Procesar pago de appointment
+      await this.processAppointmentPayment(referenceId, paymentId, paymentInfo);
+    }
+  }
+
+  // Procesar pago de appointment
+  private async processAppointmentPayment(
+    appointmentId: string,
+    paymentId: number,
+    paymentInfo: any,
+  ): Promise<void> {
     const appointment = await this.appointmentsService.findOne(appointmentId);
 
     if (
@@ -408,24 +550,24 @@ export class PaymentsService {
         appointment.paymentMethod = PaymentMethod.MP;
         appointment.paymentId = paymentId.toString();
         appointment.depositPaid = paymentInfo.transaction_amount;
-        this.logger.log(`Pago aprobado para turno ${appointmentId}`);
+        this.logger.log(`✅ Pago aprobado para turno ${appointmentId}`);
         break;
 
       case 'pending':
       case 'in_process':
         appointment.paymentStatus = PaymentStatus.PENDING;
-        this.logger.log(`Pago pendiente para turno ${appointmentId}`);
+        this.logger.log(`⏳ Pago pendiente para turno ${appointmentId}`);
         break;
 
       case 'rejected':
       case 'cancelled':
         appointment.paymentStatus = PaymentStatus.PENDING;
-        this.logger.log(`Pago rechazado para turno ${appointmentId}`);
+        this.logger.log(`❌ Pago rechazado para turno ${appointmentId}`);
         break;
 
       case 'refunded':
         appointment.paymentStatus = PaymentStatus.REFUNDED;
-        this.logger.log(`Pago reembolsado para turno ${appointmentId}`);
+        this.logger.log(`💸 Pago reembolsado para turno ${appointmentId}`);
         break;
 
       default:
@@ -438,10 +580,27 @@ export class PaymentsService {
     await this.appointmentsRepository.save(appointment);
   }
 
+  // Procesar pago de gift card
+  private async processGiftCardPayment(
+    giftCardId: string,
+    paymentId: number,
+    paymentInfo: any,
+  ): Promise<void> {
+    await this.giftCardsService.activate(
+      giftCardId,
+      paymentId.toString(),
+      paymentInfo.status,
+    );
+
+    this.logger.log(
+      `🎁 Gift Card procesada: ${giftCardId} - Status: ${paymentInfo.status}`,
+    );
+  }
+
   private async getPaymentInfo(paymentId: number): Promise<any> {
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/payments/${paymentId}`,
+        `https://api.mercadopago.com/v1/payments/${paymentId}`,
         {
           headers: {
             Authorization: `Bearer ${this.getAccessToken()}`,
@@ -478,7 +637,7 @@ export class PaymentsService {
 
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/payments/${appointment.paymentId}/refunds`,
+        `https://api.mercadopago.com/v1/payments/${appointment.paymentId}/refunds`,
         {
           method: 'POST',
           headers: {
@@ -502,7 +661,7 @@ export class PaymentsService {
       appointment.paymentStatus = PaymentStatus.REFUNDED;
       await this.appointmentsRepository.save(appointment);
 
-      this.logger.log(`Reembolso procesado para turno ${appointmentId}`);
+      this.logger.log(`💸 Reembolso procesado para turno ${appointmentId}`);
     } catch (error) {
       this.logger.error('Error procesando reembolso', error);
       throw new BadRequestException('Error al procesar reembolso');

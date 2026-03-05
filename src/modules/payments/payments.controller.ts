@@ -118,4 +118,31 @@ export class PaymentsController {
       appointmentId,
     };
   }
+
+  @Post('gift-card/:giftCardId/create-preference')
+  @Public()
+  @ApiOperation({
+    summary: 'Crear preferencia de pago para gift card (público)',
+    description:
+      'Genera link de pago de Mercado Pago para comprar una gift card',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Preferencia creada exitosamente',
+    schema: {
+      type: 'object',
+      properties: {
+        preferenceId: { type: 'string' },
+        initPoint: { type: 'string' },
+        sandboxInitPoint: { type: 'string' },
+      },
+    },
+  })
+  async createGiftCardPreference(
+    @Param('giftCardId', ParseUUIDPipe) giftCardId: string,
+  ) {
+    return await this.paymentsService.createGiftCardPaymentPreference(
+      giftCardId,
+    );
+  }
 }

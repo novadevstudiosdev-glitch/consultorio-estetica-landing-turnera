@@ -8,6 +8,7 @@ import { Service } from '../modules/services/entities/service.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { BlockedSlot } from '@/modules/blocked-slots/entities/blocked-slot.entity';
 import { BusinessHours } from '@/modules/business-hours/entities/business-hours.entity';
+import { GiftCard } from '@/modules/gift-cards/entities/gift-card.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -26,6 +27,7 @@ export const getDatabaseConfig = (
     Appointment,
     BusinessHours,
     BlockedSlot,
+    GiftCard,
     // Agregar más cuando las crees
   ],
   synchronize: configService.get('NODE_ENV') === 'development',

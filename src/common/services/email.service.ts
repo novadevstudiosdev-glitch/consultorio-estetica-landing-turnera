@@ -241,6 +241,47 @@ export class EmailService {
     }
   }
 
+  /**
+   * Enviar gift card por email
+   */
+  async sendGiftCardEmail(
+    to: string,
+    data: {
+      recipientName: string;
+      code: string;
+      amount: number;
+      expirationDate: string;
+      purchaserName: string;
+      personalMessage?: string;
+    },
+  ): Promise<void> {
+    if (!this.resend) {
+      this.logger.warn(`📧 [SIMULATED] Gift card email to ${to}`);
+      this.logger.warn(`Code: ${data.code}, Amount: $${data.amount}`);
+      return;
+    }
+
+    const html = this.getGiftCardEmailTemplate(data);
+
+    try {
+      const { data: emailData, error } = await this.resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to,
+        subject: '🎁 ¡Recibiste una Gift Card!',
+        html,
+      });
+
+      if (error) throw error;
+
+      this.logger.log(
+        `📧 Gift Card email sent to ${to} (Code: ${data.code}, ID: ${emailData?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(`❌ Error sending gift card email to ${to}:`, error);
+      throw error;
+    }
+  }
+
   // ============================================================
   // BASE TEMPLATE (ESTÉTICA ROSA / PRO)
   // ============================================================
@@ -253,7 +294,7 @@ export class EmailService {
     bodyHtml: string;
     cta?: { label: string; url: string };
     footerLines?: string[];
-    variant?: 'default' | 'success' | 'warning' | 'danger';
+    variant?: 'default' | 'success' | 'warning' | 'danger' | 'gift';
   }): string {
     const {
       preheader = '',
@@ -282,6 +323,7 @@ export class EmailService {
       success: '#BFA2AA',
       warning: '#D9A3AE',
       danger: '#C17886',
+      gift: '#E91E63',
     };
 
     const variantMap = {
@@ -305,12 +347,21 @@ export class EmailService {
         accentSoft: '#F7E6EA',
         label: 'Cancelado',
       },
+      // 🔥 AGREGAR variant para gift cards
+      gift: {
+        accent: COLORS.gift,
+        accentSoft: '#FCE4EC',
+        label: 'Gift Card',
+      },
     }[variant];
 
     const businessName =
-      this.configService.get('BUSINESS_NAME') || 'Turnera Médica';
-    const businessAddress = this.configService.get('BUSINESS_ADDRESS') || '';
-    const businessPhone = this.configService.get('BUSINESS_PHONE') || '';
+      this.configService.get('BUSINESS_NAME') || 'Dra. Jaquelina Grassetti';
+    const businessAddress =
+      this.configService.get('BUSINESS_ADDRESS') ||
+      'Junín 191, Piso VIII, Consultorio I, Rosario - Sta. Fe';
+    const businessPhone =
+      this.configService.get('BUSINESS_PHONE') || '+54 9 341 7511529';
     const footerDefault = [businessName, businessAddress, businessPhone].filter(
       Boolean,
     );
@@ -592,6 +643,73 @@ export class EmailService {
         </div>
         <p style="margin-top:14px;">Podés reagendar cuando quieras desde la app.</p>
       `,
+    });
+  }
+
+  // NUEVO TEMPLATE: Gift Card Email
+  private getGiftCardEmailTemplate(data: {
+    recipientName: string;
+    code: string;
+    amount: number;
+    expirationDate: string;
+    purchaserName: string;
+    personalMessage?: string;
+  }): string {
+    const whatsappUrl = `https://wa.me/5493417511529?text=Hola!%20Tengo%20una%20Gift%20Card%20con%20código%20${data.code}`;
+
+    return this.getBaseEmailTemplate({
+      preheader: `${data.purchaserName} te regaló $${data.amount.toLocaleString('es-AR')} en tratamientos!`,
+      title: '🎁 ¡Recibiste una Gift Card!',
+      greetingName: data.recipientName,
+      variant: 'gift',
+      introHtml: `
+        <p><strong>${data.purchaserName}</strong> te ha regalado una Gift Card para que disfrutes de nuestros tratamientos de medicina estética.</p>
+        ${
+          data.personalMessage
+            ? `
+        <div class="infoBox" style="background:#FCE4EC; border-color:#E91E63;">
+          <p style="margin:0; font-style:italic; color:#7A7A7A;">
+            <strong>Mensaje de ${data.purchaserName}:</strong><br>
+            "${data.personalMessage}"
+          </p>
+        </div>
+        `
+            : ''
+        }
+      `,
+      bodyHtml: `
+        <div class="infoBox" style="text-align:center; padding:24px; background: linear-gradient(135deg, #FCE4EC 0%, #FFFFFF 100%);">
+          <p style="margin:0 0 8px 0; font-size:12px; color:#7A7A7A; text-transform:uppercase; letter-spacing:1px;">Código de Gift Card</p>
+          <p style="margin:0 0 16px 0; font-size:28px; font-weight:bold; color:#E91E63; font-family:'Courier New',monospace; letter-spacing:2px;">${data.code}</p>
+          <p style="margin:0; font-size:32px; font-weight:bold; color:#E91E63;">$${data.amount.toLocaleString('es-AR')}</p>
+        </div>
+
+        <div class="infoBox">
+          <p style="margin:0 0 12px 0; font-weight:bold; color:#E91E63;">🌟 ¿Cómo usar tu Gift Card?</p>
+          <p class="infoRow">1️⃣ <strong>Agendá tu turno:</strong> Escribinos por WhatsApp mencionando que tenés una Gift Card</p>
+          <p class="infoRow">2️⃣ <strong>Presentá tu código:</strong> Compartí el código <strong>${data.code}</strong> cuando agendes</p>
+          <p class="infoRow" style="margin:0;">3️⃣ <strong>¡Disfrutá!</strong> Elegí el tratamiento que más te guste</p>
+        </div>
+
+        <div class="infoBox">
+          <p style="margin:0 0 8px 0; font-weight:bold;">📋 Condiciones</p>
+          <p class="infoRow" style="font-size:13px;">✅ Válida por 90 días (hasta el <strong>${new Date(data.expirationDate).toLocaleDateString('es-AR')}</strong>)</p>
+          <p class="infoRow" style="font-size:13px;">✅ Puede usarse en uno o más tratamientos hasta agotar el saldo</p>
+          <p class="infoRow" style="font-size:13px;">✅ Tratamientos personalizados según necesidad</p>
+          <p class="infoRow" style="font-size:13px;">❌ No reembolsable ni canjeable por efectivo</p>
+          <p class="infoRow" style="font-size:13px; margin:0;">📅 Turnos sujetos a disponibilidad</p>
+        </div>
+      `,
+      cta: {
+        label: '💬 Agendar por WhatsApp',
+        url: whatsappUrl,
+      },
+      footerLines: [
+        'Dra. Jaquelina Grassetti - Medicina Estética',
+        'Junín 191, Piso VIII, Consultorio I, Rosario - Sta. Fe',
+        '📞 +54 9 341 7511529',
+        '📷 Instagram: @dra.jaquelinagrassetti',
+      ],
     });
   }
 }
