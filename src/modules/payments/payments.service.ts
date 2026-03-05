@@ -11,20 +11,22 @@ import {
   PaymentMethod,
 } from '../appointments/entities/appointment.entity';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { User } from '../users/entities/user.entity';
 
 interface CreatePaymentDto {
   appointmentId: string;
   amount: number;
   description: string;
-  payer: {
-    email: string;
-    name: string;
+  payer?: {
+    email?: string;
+    name?: string;
   };
 }
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
+  private static readonly DEFAULT_PENDING_TTL_MINUTES = 15;
   private mercadopago: MercadoPagoConfig;
   private preference: Preference;
 
@@ -70,6 +72,15 @@ export class PaymentsService {
     return /@testuser\.com$/i.test(email ?? '');
   }
 
+  private getConfiguredTestPayerEmail(): string | undefined {
+    return this.configService.get<string>('MP_TEST_PAYER_EMAIL')?.trim();
+  }
+
+  private normalizeEmail(email?: string): string | undefined {
+    const normalized = email?.trim().toLowerCase();
+    return normalized || undefined;
+  }
+
   private normalizeBaseUrl(url?: string): string | undefined {
     if (!url) {
       return undefined;
@@ -106,6 +117,19 @@ export class PaymentsService {
     return normalized || undefined;
   }
 
+  private getPendingTtlMinutes(): number {
+    const raw =
+      this.configService.get<string>('PENDING_APPOINTMENT_TTL_MINUTES') ??
+      PaymentsService.DEFAULT_PENDING_TTL_MINUTES.toString();
+    const parsed = Number(raw);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return PaymentsService.DEFAULT_PENDING_TTL_MINUTES;
+    }
+
+    return Math.floor(parsed);
+  }
+
   private getMercadoPagoErrorDetails(error: unknown): string {
     const mpError = error as any;
     const apiResponse = mpError?.api_response;
@@ -135,7 +159,10 @@ export class PaymentsService {
       .join(' - ');
   }
 
-  async createPaymentPreference(createPaymentDto: CreatePaymentDto): Promise<{
+  async createPaymentPreference(
+    createPaymentDto: CreatePaymentDto,
+    user?: Pick<User, 'email' | 'fullName'>,
+  ): Promise<{
     preferenceId: string;
     initPoint: string;
     sandboxInitPoint: string;
@@ -194,17 +221,44 @@ export class PaymentsService {
         },
       };
 
+      const requestedPayerEmail = this.normalizeEmail(
+        createPaymentDto.payer?.email,
+      );
+      const authenticatedPayerEmail = this.normalizeEmail(user?.email);
+      const configuredTestPayerEmail = this.normalizeEmail(
+        this.getConfiguredTestPayerEmail(),
+      );
+      const payerEmailCandidate =
+        authenticatedPayerEmail ?? requestedPayerEmail;
+      const payerName =
+        createPaymentDto.payer?.name?.trim() ||
+        user?.fullName?.trim() ||
+        appointment.patientName;
+
       if (
-        !this.isTestAccessToken(accessToken) ||
-        this.isTestPayerEmail(createPaymentDto.payer.email)
+        authenticatedPayerEmail &&
+        requestedPayerEmail &&
+        authenticatedPayerEmail !== requestedPayerEmail
       ) {
+        this.logger.warn(
+          `Se ignora payer.email del body (${requestedPayerEmail}) para el turno ${appointment.id} y se usa el email autenticado (${authenticatedPayerEmail}).`,
+        );
+      }
+
+      const payerEmail = this.isTestAccessToken(accessToken)
+        ? this.isTestPayerEmail(payerEmailCandidate)
+          ? payerEmailCandidate
+          : configuredTestPayerEmail
+        : payerEmailCandidate;
+
+      if (payerEmail) {
         preferenceData.payer = {
-          name: createPaymentDto.payer.name,
-          email: createPaymentDto.payer.email,
+          name: payerName,
+          email: payerEmail,
         };
       } else {
         this.logger.warn(
-          `Modo TEST con payer.email no valido para pruebas (${createPaymentDto.payer.email}). Se omite payer para evitar errores de checkout.`,
+          `No se pudo resolver un payer.email valido para el turno ${appointment.id}. Se omite payer para evitar errores de checkout.`,
         );
       }
 
@@ -233,6 +287,14 @@ export class PaymentsService {
         preferenceData.statement_descriptor = statementDescriptor;
       }
 
+      const now = new Date();
+      const expirationDateTo = new Date(
+        now.getTime() + this.getPendingTtlMinutes() * 60 * 1000,
+      );
+      preferenceData.expires = true;
+      preferenceData.expiration_date_from = now.toISOString();
+      preferenceData.expiration_date_to = expirationDateTo.toISOString();
+
       this.logger.log(
         `Creando preferencia MP: ${JSON.stringify({
           appointmentId: appointment.id,
@@ -250,8 +312,8 @@ export class PaymentsService {
       const response = await this.preference.create({ body: preferenceData });
       const isTestMode = this.isTestAccessToken(accessToken);
       const checkoutUrl = isTestMode
-        ? response.sandbox_init_point ?? response.init_point
-        : response.init_point ?? response.sandbox_init_point;
+        ? (response.sandbox_init_point ?? response.init_point)
+        : (response.init_point ?? response.sandbox_init_point);
 
       if (!response.id || !checkoutUrl) {
         this.logger.error(
@@ -329,6 +391,16 @@ export class PaymentsService {
 
     const appointment = await this.appointmentsService.findOne(appointmentId);
 
+    if (
+      paymentInfo.status === 'approved' &&
+      appointment.status === AppointmentStatus.CANCELLED
+    ) {
+      this.logger.warn(
+        `Pago aprobado para turno cancelado ${appointmentId}. Se mantiene cancelado para revision manual.`,
+      );
+      return;
+    }
+
     switch (paymentInfo.status) {
       case 'approved':
         appointment.status = AppointmentStatus.CONFIRMED;
@@ -369,7 +441,7 @@ export class PaymentsService {
   private async getPaymentInfo(paymentId: number): Promise<any> {
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/v1/payments/${paymentId}`,
+        `https://api.mercadopago.com/payments/${paymentId}`,
         {
           headers: {
             Authorization: `Bearer ${this.getAccessToken()}`,
@@ -406,7 +478,7 @@ export class PaymentsService {
 
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/v1/payments/${appointment.paymentId}/refunds`,
+        `https://api.mercadopago.com/payments/${appointment.paymentId}/refunds`,
         {
           method: 'POST',
           headers: {

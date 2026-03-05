@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -15,12 +16,13 @@ import { Service } from '../services/entities/service.entity';
 export interface TimeSlot {
   time: string; // HH:mm
   available: boolean;
-  reason?: string; // Si no está disponible, por qué
+  reason?: string; // If not available, reason
 }
 
 @Injectable()
 export class SlotsService {
   private readonly logger = new Logger(SlotsService.name);
+  private static readonly DEFAULT_PENDING_TTL_MINUTES = 15;
 
   constructor(
     @InjectRepository(BusinessHours)
@@ -31,23 +33,20 @@ export class SlotsService {
     private appointmentsRepository: Repository<Appointment>,
     @InjectRepository(Service)
     private servicesRepository: Repository<Service>,
+    private configService: ConfigService,
   ) {}
 
   /**
-   * Obtener slots disponibles para un servicio en una fecha
+   * Get available slots for a service and date.
    */
   async getAvailableSlots(
     serviceId: string,
     date: string,
   ): Promise<TimeSlot[]> {
-    // 1. Validar formato de fecha
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      throw new BadRequestException(
-        'Formato de fecha inválido. Use YYYY-MM-DD',
-      );
+      throw new BadRequestException('Formato de fecha invalido. Use YYYY-MM-DD');
     }
 
-    // 2. Obtener el servicio
     const service = await this.servicesRepository.findOne({
       where: { id: serviceId },
     });
@@ -55,12 +54,9 @@ export class SlotsService {
       throw new BadRequestException('Servicio no encontrado');
     }
 
-    // 3. Obtener día de la semana SIN timezone conversion
     const dayOfWeek = this.getDayOfWeekFromString(date);
+    this.logger.debug(`Fecha: ${date} -> Dia: ${dayOfWeek}`);
 
-    this.logger.debug(`📅 Fecha: ${date} -> Día: ${dayOfWeek}`);
-
-    // 4. Obtener horarios de negocio
     const businessHours = await this.businessHoursRepository.findOne({
       where: {
         dayOfWeek,
@@ -73,7 +69,6 @@ export class SlotsService {
       return [];
     }
 
-    // 5. Generar todos los slots posibles
     const allSlots = this.generateTimeSlots(
       businessHours.openTime,
       businessHours.closeTime,
@@ -81,20 +76,31 @@ export class SlotsService {
       service.durationMinutes,
     );
 
-    // 6. Obtener slots bloqueados
     const blockedSlots = await this.getBlockedSlotsForDate(date);
 
-    // 7. Obtener appointments existentes
-    const existingAppointments = await this.appointmentsRepository.find({
-      where: {
-        appointmentDate: date as any,
-        status: AppointmentStatus.CONFIRMED,
-      },
-    });
+    const pendingExpirationCutoff = this.getPendingExpirationCutoff();
+    const existingAppointments = await this.appointmentsRepository
+      .createQueryBuilder('appointment')
+      .select(['appointment.appointmentTime'])
+      .where('appointment.appointmentDate = :date', { date })
+      .andWhere('appointment.status != :cancelledStatus', {
+        cancelledStatus: AppointmentStatus.CANCELLED,
+      })
+      .andWhere(
+        '(appointment.status != :pendingStatus OR appointment.createdAt > :pendingExpirationCutoff)',
+        {
+          pendingStatus: AppointmentStatus.PENDING,
+          pendingExpirationCutoff,
+        },
+      )
+      .getMany();
+    const occupiedSlots = new Set(
+      existingAppointments
+        .map((appointment) => this.normalizeTime(appointment.appointmentTime))
+        .filter(Boolean),
+    );
 
-    // 8. Marcar disponibilidad de cada slot
     const slotsWithAvailability = allSlots.map((slot) => {
-      // Verificar si está bloqueado
       const isBlocked = this.isSlotBlocked(slot, blockedSlots);
       if (isBlocked) {
         return {
@@ -104,10 +110,7 @@ export class SlotsService {
         };
       }
 
-      // Verificar si ya tiene appointment
-      const isOccupied = existingAppointments.some(
-        (apt) => apt.appointmentTime === slot,
-      );
+      const isOccupied = occupiedSlots.has(this.normalizeTime(slot));
       if (isOccupied) {
         return {
           time: slot,
@@ -116,7 +119,6 @@ export class SlotsService {
         };
       }
 
-      // Disponible!
       return {
         time: slot,
         available: true,
@@ -127,7 +129,7 @@ export class SlotsService {
   }
 
   /**
-   * Generar slots de tiempo entre hora inicio y fin
+   * Generate slots between open and close time.
    */
   private generateTimeSlots(
     startTime: string,
@@ -137,13 +139,12 @@ export class SlotsService {
   ): string[] {
     const slots: string[] = [];
 
-    let [startHour, startMinute] = startTime.split(':').map(Number);
+    const [startHour, startMinute] = startTime.split(':').map(Number);
     const [endHour, endMinute] = endTime.split(':').map(Number);
 
     let currentMinutes = startHour * 60 + startMinute;
     const endMinutes = endHour * 60 + endMinute;
 
-    // Generar slots hasta que no quede tiempo para el servicio
     while (currentMinutes + serviceDuration <= endMinutes) {
       const hours = Math.floor(currentMinutes / 60);
       const minutes = currentMinutes % 60;
@@ -158,13 +159,10 @@ export class SlotsService {
   }
 
   /**
-   * Obtener día de la semana (sin conversión de timezone)
+   * Get day of week without UTC conversion.
    */
   private getDayOfWeekFromString(dateString: string): DayOfWeek {
-    // Parsear manualmente para evitar conversión UTC
     const [year, month, day] = dateString.split('-').map(Number);
-
-    // Crear fecha en zona horaria local
     const date = new Date(year, month - 1, day);
 
     const days = [
@@ -180,9 +178,6 @@ export class SlotsService {
     return days[date.getDay()];
   }
 
-  /**
-   * Obtener slots bloqueados para una fecha
-   */
   private async getBlockedSlotsForDate(date: string): Promise<BlockedSlot[]> {
     return await this.blockedSlotsRepository.find({
       where: {
@@ -192,25 +187,81 @@ export class SlotsService {
     });
   }
 
-  /**
-   * Verificar si un slot está bloqueado
-   */
-  private isSlotBlocked(
-    timeSlot: string,
-    blockedSlots: BlockedSlot[],
-  ): boolean {
+  private isSlotBlocked(timeSlot: string, blockedSlots: BlockedSlot[]): boolean {
+    const slotMinutes = this.timeToMinutes(timeSlot);
+
+    if (slotMinutes === null) {
+      return false;
+    }
+
     for (const blocked of blockedSlots) {
-      // Si no tiene horas específicas, bloquea TODO el día
       if (!blocked.startTime || !blocked.endTime) {
         return true;
       }
 
-      // Verificar si el slot está dentro del rango bloqueado
-      if (timeSlot >= blocked.startTime && timeSlot < blocked.endTime) {
+      const blockedStartMinutes = this.timeToMinutes(blocked.startTime);
+      const blockedEndMinutes = this.timeToMinutes(blocked.endTime);
+
+      if (blockedStartMinutes === null || blockedEndMinutes === null) {
+        continue;
+      }
+
+      if (slotMinutes >= blockedStartMinutes && slotMinutes < blockedEndMinutes) {
         return true;
       }
     }
 
     return false;
+  }
+
+  private normalizeTime(time?: string): string {
+    if (!time) {
+      return '';
+    }
+
+    const [hours = '', minutes = ''] = time.trim().split(':');
+    return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  }
+
+  private timeToMinutes(time?: string): number | null {
+    if (!time) {
+      return null;
+    }
+
+    const [hoursRaw, minutesRaw] = time.trim().split(':');
+    const hours = Number(hoursRaw);
+    const minutes = Number(minutesRaw);
+
+    if (
+      !Number.isInteger(hours) ||
+      !Number.isInteger(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      return null;
+    }
+
+    return hours * 60 + minutes;
+  }
+
+  private getPendingTtlMinutes(): number {
+    const raw =
+      this.configService.get<string>('PENDING_APPOINTMENT_TTL_MINUTES') ??
+      SlotsService.DEFAULT_PENDING_TTL_MINUTES.toString();
+    const parsed = Number(raw);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return SlotsService.DEFAULT_PENDING_TTL_MINUTES;
+    }
+
+    return Math.floor(parsed);
+  }
+
+  private getPendingExpirationCutoff(referenceDate: Date = new Date()): Date {
+    return new Date(
+      referenceDate.getTime() - this.getPendingTtlMinutes() * 60 * 1000,
+    );
   }
 }
