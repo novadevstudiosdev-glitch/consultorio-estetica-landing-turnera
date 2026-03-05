@@ -19,8 +19,6 @@ export enum GiftCardStatus {
 }
 
 @Entity('gift_cards')
-@Index(['code'])
-@Index(['status'])
 export class GiftCard {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -32,7 +30,12 @@ export class GiftCard {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number; // Monto inicial
 
-  @Column({ name: 'remaining_amount', type: 'decimal', precision: 10, scale: 2 })
+  @Column({
+    name: 'remaining_amount',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+  })
   remainingAmount: number; // Saldo restante (para uso parcial)
 
   @Column({
@@ -50,7 +53,12 @@ export class GiftCard {
   @Column({ name: 'purchaser_email', type: 'varchar', length: 255 })
   purchaserEmail: string;
 
-  @Column({ name: 'purchaser_phone', type: 'varchar', length: 50, nullable: true })
+  @Column({
+    name: 'purchaser_phone',
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+  })
   purchaserPhone?: string;
 
   // Información del beneficiario
@@ -60,7 +68,12 @@ export class GiftCard {
   @Column({ name: 'recipient_email', type: 'varchar', length: 255 })
   recipientEmail: string;
 
-  @Column({ name: 'recipient_phone', type: 'varchar', length: 50, nullable: true })
+  @Column({
+    name: 'recipient_phone',
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+  })
   recipientPhone?: string;
 
   @Column({ name: 'personal_message', type: 'text', nullable: true })
@@ -88,7 +101,12 @@ export class GiftCard {
   @Column({ name: 'payment_id', type: 'varchar', length: 255, nullable: true })
   paymentId?: string; // Mercado Pago payment ID
 
-  @Column({ name: 'payment_status', type: 'varchar', length: 50, nullable: true })
+  @Column({
+    name: 'payment_status',
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+  })
   paymentStatus?: string; // approved, pending, rejected
 
   // Notas admin

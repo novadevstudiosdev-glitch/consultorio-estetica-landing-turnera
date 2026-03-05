@@ -11,7 +11,7 @@ import { EmailService } from '../../common/services/email.service';
     // EmailService se provee como provider, no como módulo
   ],
   controllers: [GiftCardsController],
-  providers: [GiftCardsService],
+  providers: [GiftCardsService, EmailService],
   exports: [GiftCardsService],
 })
 export class GiftCardsModule {}
