@@ -1,7 +1,9 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -34,7 +36,7 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Crear preferencia de pago para un turno',
     description:
-      'Genera un link de pago de Mercado Pago para la seña del turno',
+      'Genera un link de pago de Mercado Pago para la se�a del turno',
   })
   @ApiResponse({
     status: 201,
@@ -43,7 +45,7 @@ export class PaymentsController {
       type: 'object',
       properties: {
         preferenceId: { type: 'string' },
-        initPoint: { type: 'string', description: 'URL de pago (producción)' },
+        initPoint: { type: 'string', description: 'URL de pago (produccion)' },
         sandboxInitPoint: {
           type: 'string',
           description: 'URL de pago (testing)',
@@ -71,13 +73,27 @@ export class PaymentsController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Webhook de Mercado Pago (público)',
+    summary: 'Webhook de Mercado Pago (publico)',
     description:
-      'Mercado Pago envía notificaciones aquí cuando cambia el estado del pago',
+      'Mercado Pago envia notificaciones aqui cuando cambia el estado del pago',
   })
   @ApiResponse({ status: 200, description: 'Webhook procesado' })
-  async webhook(@Body() body: any) {
-    await this.paymentsService.processWebhook(body);
+  async webhook(@Body() body: any, @Query() query: Record<string, unknown>) {
+    await this.paymentsService.processWebhook(body, query);
+    return { status: 'ok' };
+  }
+
+  @Get('webhook')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Webhook/IPN de Mercado Pago por query params (publico)',
+    description:
+      'Compatibilidad para notificaciones que llegan como query string (IPN)',
+  })
+  @ApiResponse({ status: 200, description: 'Webhook procesado' })
+  async webhookGet(@Query() query: Record<string, unknown>) {
+    await this.paymentsService.processWebhook(undefined, query);
     return { status: 'ok' };
   }
 

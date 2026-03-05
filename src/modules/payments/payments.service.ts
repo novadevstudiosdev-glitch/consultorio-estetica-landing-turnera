@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
@@ -359,37 +360,110 @@ export class PaymentsService {
     }
   }
 
-  async processWebhook(body: any): Promise<void> {
-    this.logger.log(`Webhook recibido: ${JSON.stringify(body)}`);
+  private parsePaymentId(rawValue: unknown): number | null {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null;
+    }
+    return Math.floor(parsed);
+  }
 
-    const { type, data } = body;
-
-    if (type !== 'payment') {
-      this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
-      return;
+  private parsePaymentIdFromResource(resource?: unknown): number | null {
+    if (typeof resource !== 'string' || resource.trim() === '') {
+      return null;
     }
 
-    const paymentId = Number(data?.id);
-
-    if (!Number.isFinite(paymentId) || paymentId <= 0) {
-      throw new BadRequestException('Webhook de pago sin data.id valido');
+    const match = resource.match(/\/payments\/(\d+)(?:\D|$)/i);
+    if (!match?.[1]) {
+      return null;
     }
 
-    const paymentInfo = await this.getPaymentInfo(paymentId);
+    return this.parsePaymentId(match[1]);
+  }
 
-    if (!paymentInfo) {
-      throw new BadRequestException(
-        `No se pudo obtener info del pago ${paymentId}`,
-      );
+  private resolveWebhookPaymentData(
+    body?: unknown,
+    query?: Record<string, unknown>,
+  ): {
+    type?: string;
+    paymentId?: number;
+    payload: Record<string, unknown>;
+  } {
+    const bodyRecord =
+      body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const queryRecord = query ?? {};
+
+    const bodyData =
+      bodyRecord.data && typeof bodyRecord.data === 'object'
+        ? (bodyRecord.data as Record<string, unknown>)
+        : undefined;
+
+    const rawTypeCandidate =
+      bodyRecord.type ??
+      bodyRecord.topic ??
+      bodyRecord.action ??
+      queryRecord.type ??
+      queryRecord.topic ??
+      queryRecord.action;
+
+    let normalizedType: string | undefined;
+    if (typeof rawTypeCandidate === 'string' && rawTypeCandidate.trim() !== '') {
+      const typeValue = rawTypeCandidate.trim().toLowerCase();
+      normalizedType = typeValue.startsWith('payment') ? 'payment' : typeValue;
     }
 
-    const appointmentId = paymentInfo.external_reference;
+    const paymentIdCandidates: unknown[] = [
+      bodyData?.id,
+      bodyRecord['data.id'],
+      bodyRecord.id,
+      queryRecord['data.id'],
+      queryRecord.id,
+      this.parsePaymentIdFromResource(bodyRecord.resource),
+      this.parsePaymentIdFromResource(queryRecord.resource),
+    ];
+
+    let paymentId: number | undefined;
+    for (const candidate of paymentIdCandidates) {
+      const parsed = this.parsePaymentId(candidate);
+      if (parsed) {
+        paymentId = parsed;
+        break;
+      }
+    }
+
+    return {
+      type: normalizedType,
+      paymentId,
+      payload: {
+        body: bodyRecord,
+        query: queryRecord,
+      },
+    };
+  }
+
+  private async syncAppointmentWithPaymentInfo(
+    paymentId: number,
+    paymentInfo: any,
+    source: 'webhook' | 'reconcile',
+  ): Promise<boolean> {
+    const appointmentId = String(paymentInfo?.external_reference ?? '').trim();
 
     if (!appointmentId) {
-      throw new BadRequestException('Webhook sin external_reference');
+      this.logger.warn(
+        `Pago ${paymentId} sin external_reference. Origen: ${source}.`,
+      );
+      return false;
     }
 
-    const appointment = await this.appointmentsService.findOne(appointmentId);
+    let appointment: Appointment;
+    try {
+      appointment = await this.appointmentsService.findOne(appointmentId);
+    } catch (error) {
+      this.logger.warn(
+        `No se encontro turno para external_reference ${appointmentId}. Origen: ${source}.`,
+      );
+      return false;
+    }
 
     if (
       paymentInfo.status === 'approved' &&
@@ -398,7 +472,7 @@ export class PaymentsService {
       this.logger.warn(
         `Pago aprobado para turno cancelado ${appointmentId}. Se mantiene cancelado para revision manual.`,
       );
-      return;
+      return false;
     }
 
     switch (paymentInfo.status) {
@@ -407,7 +481,7 @@ export class PaymentsService {
         appointment.paymentStatus = PaymentStatus.PAID;
         appointment.paymentMethod = PaymentMethod.MP;
         appointment.paymentId = paymentId.toString();
-        appointment.depositPaid = paymentInfo.transaction_amount;
+        appointment.depositPaid = Number(paymentInfo.transaction_amount ?? 0);
         this.logger.log(`Pago aprobado para turno ${appointmentId}`);
         break;
 
@@ -432,16 +506,113 @@ export class PaymentsService {
         this.logger.warn(
           `Estado de pago no manejado para turno ${appointmentId}: ${paymentInfo.status}`,
         );
-        return;
+        return false;
     }
 
     await this.appointmentsRepository.save(appointment);
+    return true;
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async reconcilePendingPaymentsCron(): Promise<void> {
+    try {
+      await this.reconcilePendingApprovedPayments();
+    } catch (error) {
+      this.logger.error('Error en reconciliacion de pagos pendientes', error);
+    }
+  }
+
+  private async reconcilePendingApprovedPayments(): Promise<number> {
+    if (!this.getAccessToken()) {
+      return 0;
+    }
+
+    const pendingAppointments = await this.appointmentsRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.status = :status', {
+        status: AppointmentStatus.PENDING,
+      })
+      .andWhere('appointment.paymentStatus = :paymentStatus', {
+        paymentStatus: PaymentStatus.PENDING,
+      })
+      .orderBy('appointment.createdAt', 'DESC')
+      .take(20)
+      .getMany();
+
+    if (pendingAppointments.length === 0) {
+      return 0;
+    }
+
+    let syncedCount = 0;
+
+    for (const appointment of pendingAppointments) {
+      const paymentInfo = await this.getLatestPaymentByExternalReference(
+        appointment.id,
+      );
+
+      if (!paymentInfo) {
+        continue;
+      }
+
+      const paymentId = this.parsePaymentId(paymentInfo.id);
+      if (!paymentId) {
+        continue;
+      }
+
+      const updated = await this.syncAppointmentWithPaymentInfo(
+        paymentId,
+        paymentInfo,
+        'reconcile',
+      );
+
+      if (updated) {
+        syncedCount += 1;
+      }
+    }
+
+    if (syncedCount > 0) {
+      this.logger.log(
+        `Reconciliacion de pagos completada. Turnos sincronizados: ${syncedCount}`,
+      );
+    }
+
+    return syncedCount;
+  }
+
+  async processWebhook(
+    body?: unknown,
+    query?: Record<string, unknown>,
+  ): Promise<void> {
+    const { type, paymentId, payload } = this.resolveWebhookPaymentData(
+      body,
+      query,
+    );
+    this.logger.log(`Webhook recibido: ${JSON.stringify(payload)}`);
+
+    if (type && type !== 'payment') {
+      this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
+      return;
+    }
+
+    if (!paymentId) {
+      throw new BadRequestException('Webhook de pago sin id valido');
+    }
+
+    const paymentInfo = await this.getPaymentInfo(paymentId);
+
+    if (!paymentInfo) {
+      throw new BadRequestException(
+        `No se pudo obtener info del pago ${paymentId}`,
+      );
+    }
+
+    await this.syncAppointmentWithPaymentInfo(paymentId, paymentInfo, 'webhook');
   }
 
   private async getPaymentInfo(paymentId: number): Promise<any> {
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/payments/${paymentId}`,
+        `https://api.mercadopago.com/v1/payments/${paymentId}`,
         {
           headers: {
             Authorization: `Bearer ${this.getAccessToken()}`,
@@ -463,6 +634,41 @@ export class PaymentsService {
     }
   }
 
+  private async getLatestPaymentByExternalReference(
+    appointmentId: string,
+  ): Promise<any | null> {
+    try {
+      const response = await fetch(
+        `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(appointmentId)}&sort=date_created&criteria=desc&limit=1`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.getAccessToken()}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          `HTTP ${response.status} al buscar pago por referencia ${appointmentId}: ${errorBody}`,
+        );
+      }
+
+      const payload = await response.json();
+      const firstResult = Array.isArray(payload?.results)
+        ? payload.results[0]
+        : null;
+
+      return firstResult ?? null;
+    } catch (error) {
+      this.logger.error(
+        `Error buscando pago por external_reference ${appointmentId}`,
+        error,
+      );
+      return null;
+    }
+  }
+
   async refundPayment(appointmentId: string, reason?: string): Promise<void> {
     const appointment = await this.appointmentsService.findOne(appointmentId);
 
@@ -478,7 +684,7 @@ export class PaymentsService {
 
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/payments/${appointment.paymentId}/refunds`,
+        `https://api.mercadopago.com/v1/payments/${appointment.paymentId}/refunds`,
         {
           method: 'POST',
           headers: {
