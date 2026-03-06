@@ -77,6 +77,19 @@ export class PaymentsService {
     return this.configService.get<string>('MP_TEST_PAYER_EMAIL')?.trim();
   }
 
+  private shouldPreferAccountMoney(): boolean {
+    const raw = this.configService
+      .get<string>('MP_PREFER_ACCOUNT_MONEY')
+      ?.trim()
+      .toLowerCase();
+
+    if (!raw) {
+      return true;
+    }
+
+    return !['0', 'false', 'no', 'off'].includes(raw);
+  }
+
   private normalizeEmail(email?: string): string | undefined {
     const normalized = email?.trim().toLowerCase();
     return normalized || undefined;
@@ -222,6 +235,12 @@ export class PaymentsService {
         },
       };
 
+      if (this.shouldPreferAccountMoney()) {
+        preferenceData.payment_methods = {
+          default_payment_method_id: 'account_money',
+        };
+      }
+
       const requestedPayerEmail = this.normalizeEmail(
         createPaymentDto.payer?.email,
       );
@@ -302,6 +321,8 @@ export class PaymentsService {
           depositAmount,
           paymentDescription,
           payerEmail: preferenceData.payer?.email ?? null,
+          defaultPaymentMethodId:
+            preferenceData.payment_methods?.default_payment_method_id ?? null,
           successUrl,
           failureUrl,
           pendingUrl,

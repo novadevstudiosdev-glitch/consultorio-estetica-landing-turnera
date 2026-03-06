@@ -27,6 +27,7 @@ import {
 } from '../business-hours/entities/business-hours.entity';
 import { BlockedSlot } from '../blocked-slots/entities/blocked-slot.entity';
 import { EmailService } from '../../common/services/email.service';
+import { WhatsappService } from '../../common/services/whatsapp.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -43,6 +44,7 @@ export class AppointmentsService {
     private configService: ConfigService,
     private servicesService: ServicesService,
     private emailService: EmailService,
+    private whatsappService: WhatsappService,
   ) {}
 
   /**
@@ -115,6 +117,21 @@ export class AppointmentsService {
       // No fallar si el email no se envía
     }
 
+    try {
+      await this.whatsappService.sendAppointmentCreated({
+        patientName: saved.patientName,
+        patientPhone: saved.patientPhone,
+        serviceName: service.name,
+        date: this.formatAppointmentDate(saved.appointmentDate),
+        time: saved.appointmentTime,
+      });
+    } catch (error) {
+      this.logger.error(
+        'Error enviando WhatsApp de creación de turno al cliente/doctora:',
+        error,
+      );
+    }
+
     return saved;
   }
 
@@ -167,6 +184,21 @@ export class AppointmentsService {
         await this.appointmentsRepository.save(saved);
       } catch (error) {
         this.logger.error('Error enviando email:', error);
+      }
+
+      try {
+        await this.whatsappService.sendAppointmentCreated({
+          patientName: saved.patientName,
+          patientPhone: saved.patientPhone,
+          serviceName: service.name,
+          date: this.formatAppointmentDate(saved.appointmentDate),
+          time: saved.appointmentTime,
+        });
+      } catch (error) {
+        this.logger.error(
+          'Error enviando WhatsApp de creación de turno al cliente/doctora:',
+          error,
+        );
       }
     }
 
@@ -313,6 +345,22 @@ export class AppointmentsService {
       );
     } catch (error) {
       this.logger.error('Error enviando email de cancelación:', error);
+    }
+
+    try {
+      await this.whatsappService.sendAppointmentCancelled({
+        patientName: cancelled.patientName,
+        patientPhone: cancelled.patientPhone,
+        serviceName: cancelled.service.name,
+        date: this.formatAppointmentDate(cancelled.appointmentDate),
+        time: cancelled.appointmentTime,
+        cancellationReason,
+      });
+    } catch (error) {
+      this.logger.error(
+        'Error enviando WhatsApp de cancelación de turno al cliente/doctora:',
+        error,
+      );
     }
 
     // Procesar reembolso si aplica
@@ -621,6 +669,15 @@ export class AppointmentsService {
     }
 
     return hours * 60 + minutes;
+  }
+
+  private formatAppointmentDate(date: string | Date): string {
+    if (date instanceof Date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    const raw = String(date ?? '').trim();
+    return raw.length > 0 ? raw : 'Sin fecha';
   }
 
   private getPendingTtlMinutes(): number {
