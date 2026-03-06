@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
@@ -363,175 +364,113 @@ export class PaymentsService {
     }
   }
 
-  // Crear preferencia para gift card
-  async createGiftCardPaymentPreference(giftCardId: string): Promise<{
-    preferenceId: string;
-    initPoint: string;
-    sandboxInitPoint: string;
-    checkoutUrl: string;
-  }> {
-    if (!this.preference) {
-      throw new BadRequestException('Mercado Pago no está configurado');
+  private parsePaymentId(rawValue: unknown): number | null {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null;
     }
-
-    const giftCard = await this.giftCardsService.findOne(giftCardId);
-
-    if (giftCard.status !== GiftCardStatus.PENDING) {
-      throw new BadRequestException('Esta gift card ya fue procesada');
-    }
-
-    try {
-      const successUrl =
-        this.configService.get<string>('MP_SUCCESS_URL') ??
-        `${this.configService.get('FRONTEND_URL')}/payments/success.html`;
-      const failureUrl =
-        this.configService.get<string>('MP_FAILURE_URL') ??
-        `${this.configService.get('FRONTEND_URL')}/payments/failure.html`;
-      const pendingUrl =
-        this.configService.get<string>('MP_PENDING_URL') ??
-        `${this.configService.get('FRONTEND_URL')}/payments/pending.html`;
-      const notificationUrl = `${this.normalizeBaseUrl(this.configService.get('BACKEND_URL'))}/${this.configService.get('API_PREFIX') || 'api'}/payments/webhook`;
-
-      const hasHttpsBackUrls =
-        this.isHttpsUrl(successUrl) &&
-        this.isHttpsUrl(failureUrl) &&
-        this.isHttpsUrl(pendingUrl);
-      const hasHttpsNotificationUrl = this.isHttpsUrl(notificationUrl);
-      const statementDescriptor = this.getStatementDescriptor();
-      const accessToken = this.getAccessToken();
-
-      const preferenceData: PreferenceRequest = {
-        items: [
-          {
-            id: giftCard.id,
-            title: `Gift Card - $${giftCard.amount}`,
-            quantity: 1,
-            unit_price: giftCard.amount,
-            currency_id: 'ARS',
-          },
-        ],
-        payer: {
-          name: giftCard.purchaserName,
-          email: giftCard.purchaserEmail,
-        },
-        external_reference: giftCard.id,
-        metadata: {
-          type: 'gift_card',
-          gift_card_id: giftCard.id,
-          code: giftCard.code,
-          recipient_name: giftCard.recipientName,
-          recipient_email: giftCard.recipientEmail,
-        },
-      };
-
-      if (hasHttpsBackUrls) {
-        preferenceData.back_urls = {
-          success: successUrl,
-          failure: failureUrl,
-          pending: pendingUrl,
-        };
-        preferenceData.auto_return = 'approved';
-      } else {
-        this.logger.warn(
-          'Mercado Pago requiere back_urls HTTPS. Se omiten para testing local.',
-        );
-      }
-
-      if (hasHttpsNotificationUrl) {
-        preferenceData.notification_url = notificationUrl;
-      } else {
-        this.logger.warn(
-          'Mercado Pago requiere notification_url HTTPS. Se omite para testing local.',
-        );
-      }
-
-      if (statementDescriptor) {
-        preferenceData.statement_descriptor = statementDescriptor;
-      }
-
-      const response = await this.preference.create({ body: preferenceData });
-      const isTestMode = this.isTestAccessToken(accessToken);
-      const checkoutUrl = isTestMode
-        ? (response.sandbox_init_point ?? response.init_point)
-        : (response.init_point ?? response.sandbox_init_point);
-
-      this.logger.log(
-        `💰 Preferencia MP creada para Gift Card ${giftCard.code}: ${response.id}`,
-      );
-
-      return {
-        preferenceId: response.id!,
-        initPoint: response.init_point ?? '',
-        sandboxInitPoint: response.sandbox_init_point ?? '',
-        checkoutUrl: checkoutUrl!,
-      };
-    } catch (error) {
-      const details = this.getMercadoPagoErrorDetails(error);
-
-      this.logger.error(
-        `Error creando preferencia de pago para gift card:`,
-        error,
-      );
-
-      throw new BadRequestException(
-        details
-          ? `Error al crear preferencia de pago: ${details}`
-          : 'Error al crear preferencia de pago',
-      );
-    }
+    return Math.floor(parsed);
   }
 
-  // Webhook maneja appointments Y gift cards
-  async processWebhook(body: any): Promise<void> {
-    this.logger.log(`Webhook recibido: ${JSON.stringify(body)}`);
-
-    const { type, data } = body;
-
-    if (type !== 'payment') {
-      this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
-      return;
+  private parsePaymentIdFromResource(resource?: unknown): number | null {
+    if (typeof resource !== 'string' || resource.trim() === '') {
+      return null;
     }
 
-    const paymentId = Number(data?.id);
-
-    if (!Number.isFinite(paymentId) || paymentId <= 0) {
-      throw new BadRequestException('Webhook de pago sin data.id valido');
+    const match = resource.match(/\/payments\/(\d+)(?:\D|$)/i);
+    if (!match?.[1]) {
+      return null;
     }
 
-    const paymentInfo = await this.getPaymentInfo(paymentId);
-
-    if (!paymentInfo) {
-      throw new BadRequestException(
-        `No se pudo obtener info del pago ${paymentId}`,
-      );
-    }
-
-    const referenceId = paymentInfo.external_reference;
-    const metadata = paymentInfo.metadata;
-
-    if (!referenceId) {
-      throw new BadRequestException('Webhook sin external_reference');
-    }
-
-    // Determinar si es appointment o gift card
-    const isGiftCard = metadata?.type === 'gift_card';
-
-    if (isGiftCard) {
-      // Procesar pago de gift card
-      await this.processGiftCardPayment(referenceId, paymentId, paymentInfo);
-    } else {
-      // Procesar pago de appointment
-      await this.processAppointmentPayment(referenceId, paymentId, paymentInfo);
-    }
+    return this.parsePaymentId(match[1]);
   }
 
-  // Procesar pago de appointment
-  private async processAppointmentPayment(
-    appointmentId: string,
+  private resolveWebhookPaymentData(
+    body?: unknown,
+    query?: Record<string, unknown>,
+  ): {
+    type?: string;
+    paymentId?: number;
+    payload: Record<string, unknown>;
+  } {
+    const bodyRecord =
+      body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const queryRecord = query ?? {};
+
+    const bodyData =
+      bodyRecord.data && typeof bodyRecord.data === 'object'
+        ? (bodyRecord.data as Record<string, unknown>)
+        : undefined;
+
+    const rawTypeCandidate =
+      bodyRecord.type ??
+      bodyRecord.topic ??
+      bodyRecord.action ??
+      queryRecord.type ??
+      queryRecord.topic ??
+      queryRecord.action;
+
+    let normalizedType: string | undefined;
+    if (
+      typeof rawTypeCandidate === 'string' &&
+      rawTypeCandidate.trim() !== ''
+    ) {
+      const typeValue = rawTypeCandidate.trim().toLowerCase();
+      normalizedType = typeValue.startsWith('payment') ? 'payment' : typeValue;
+    }
+
+    const paymentIdCandidates: unknown[] = [
+      bodyData?.id,
+      bodyRecord['data.id'],
+      bodyRecord.id,
+      queryRecord['data.id'],
+      queryRecord.id,
+      this.parsePaymentIdFromResource(bodyRecord.resource),
+      this.parsePaymentIdFromResource(queryRecord.resource),
+    ];
+
+    let paymentId: number | undefined;
+    for (const candidate of paymentIdCandidates) {
+      const parsed = this.parsePaymentId(candidate);
+      if (parsed) {
+        paymentId = parsed;
+        break;
+      }
+    }
+
+    return {
+      type: normalizedType,
+      paymentId,
+      payload: {
+        body: bodyRecord,
+        query: queryRecord,
+      },
+    };
+  }
+
+  private async syncAppointmentWithPaymentInfo(
     paymentId: number,
     paymentInfo: any,
-  ): Promise<void> {
-    const appointment = await this.appointmentsService.findOne(appointmentId);
+    source: 'webhook' | 'reconcile',
+  ): Promise<boolean> {
+    const appointmentId = String(paymentInfo?.external_reference ?? '').trim();
+
+    if (!appointmentId) {
+      this.logger.warn(
+        `Pago ${paymentId} sin external_reference. Origen: ${source}.`,
+      );
+      return false;
+    }
+
+    let appointment: Appointment;
+    try {
+      appointment = await this.appointmentsService.findOne(appointmentId);
+    } catch (error) {
+      this.logger.warn(
+        `No se encontro turno para external_reference ${appointmentId}. Origen: ${source}.`,
+      );
+      return false;
+    }
 
     if (
       paymentInfo.status === 'approved' &&
@@ -540,7 +479,7 @@ export class PaymentsService {
       this.logger.warn(
         `Pago aprobado para turno cancelado ${appointmentId}. Se mantiene cancelado para revision manual.`,
       );
-      return;
+      return false;
     }
 
     switch (paymentInfo.status) {
@@ -549,7 +488,7 @@ export class PaymentsService {
         appointment.paymentStatus = PaymentStatus.PAID;
         appointment.paymentMethod = PaymentMethod.MP;
         appointment.paymentId = paymentId.toString();
-        appointment.depositPaid = paymentInfo.transaction_amount;
+        appointment.depositPaid = Number(paymentInfo.transaction_amount ?? 0);
         this.logger.log(`✅ Pago aprobado para turno ${appointmentId}`);
         break;
 
@@ -574,10 +513,111 @@ export class PaymentsService {
         this.logger.warn(
           `Estado de pago no manejado para turno ${appointmentId}: ${paymentInfo.status}`,
         );
-        return;
+        return false;
     }
 
     await this.appointmentsRepository.save(appointment);
+    return true;
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async reconcilePendingPaymentsCron(): Promise<void> {
+    try {
+      await this.reconcilePendingApprovedPayments();
+    } catch (error) {
+      this.logger.error('Error en reconciliacion de pagos pendientes', error);
+    }
+  }
+
+  private async reconcilePendingApprovedPayments(): Promise<number> {
+    if (!this.getAccessToken()) {
+      return 0;
+    }
+
+    const pendingAppointments = await this.appointmentsRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.status = :status', {
+        status: AppointmentStatus.PENDING,
+      })
+      .andWhere('appointment.paymentStatus = :paymentStatus', {
+        paymentStatus: PaymentStatus.PENDING,
+      })
+      .orderBy('appointment.createdAt', 'DESC')
+      .take(20)
+      .getMany();
+
+    if (pendingAppointments.length === 0) {
+      return 0;
+    }
+
+    let syncedCount = 0;
+
+    for (const appointment of pendingAppointments) {
+      const paymentInfo = await this.getLatestPaymentByExternalReference(
+        appointment.id,
+      );
+
+      if (!paymentInfo) {
+        continue;
+      }
+
+      const paymentId = this.parsePaymentId(paymentInfo.id);
+      if (!paymentId) {
+        continue;
+      }
+
+      const updated = await this.syncAppointmentWithPaymentInfo(
+        paymentId,
+        paymentInfo,
+        'reconcile',
+      );
+
+      if (updated) {
+        syncedCount += 1;
+      }
+    }
+
+    if (syncedCount > 0) {
+      this.logger.log(
+        `Reconciliacion de pagos completada. Turnos sincronizados: ${syncedCount}`,
+      );
+    }
+
+    return syncedCount;
+  }
+
+  async processWebhook(
+    body?: unknown,
+    query?: Record<string, unknown>,
+  ): Promise<void> {
+    const { type, paymentId, payload } = this.resolveWebhookPaymentData(
+      body,
+      query,
+    );
+    this.logger.log(`Webhook recibido: ${JSON.stringify(payload)}`);
+
+    if (type && type !== 'payment') {
+      this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
+      return;
+    }
+
+    if (!paymentId) {
+      throw new BadRequestException('Webhook de pago sin id valido');
+    }
+
+    const paymentInfo = await this.getPaymentInfo(paymentId);
+
+    if (!paymentInfo) {
+      throw new BadRequestException(
+        `No se pudo obtener info del pago ${paymentId}`,
+      );
+    }
+
+    await this.syncAppointmentWithPaymentInfo(
+      paymentId,
+      paymentInfo,
+      'webhook',
+    );
   }
 
   // Procesar pago de gift card
@@ -600,7 +640,7 @@ export class PaymentsService {
   private async getPaymentInfo(paymentId: number): Promise<any> {
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/v1/payments/${paymentId}`,
+        `https://api.mercadopago.com/v1/v1/payments/${paymentId}`,
         {
           headers: {
             Authorization: `Bearer ${this.getAccessToken()}`,
@@ -622,6 +662,41 @@ export class PaymentsService {
     }
   }
 
+  private async getLatestPaymentByExternalReference(
+    appointmentId: string,
+  ): Promise<any | null> {
+    try {
+      const response = await fetch(
+        `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(appointmentId)}&sort=date_created&criteria=desc&limit=1`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.getAccessToken()}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          `HTTP ${response.status} al buscar pago por referencia ${appointmentId}: ${errorBody}`,
+        );
+      }
+
+      const payload = await response.json();
+      const firstResult = Array.isArray(payload?.results)
+        ? payload.results[0]
+        : null;
+
+      return firstResult ?? null;
+    } catch (error) {
+      this.logger.error(
+        `Error buscando pago por external_reference ${appointmentId}`,
+        error,
+      );
+      return null;
+    }
+  }
+
   async refundPayment(appointmentId: string, reason?: string): Promise<void> {
     const appointment = await this.appointmentsService.findOne(appointmentId);
 
@@ -637,7 +712,7 @@ export class PaymentsService {
 
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/v1/payments/${appointment.paymentId}/refunds`,
+        `https://api.mercadopago.com/v1/v1/payments/${appointment.paymentId}/refunds`,
         {
           method: 'POST',
           headers: {

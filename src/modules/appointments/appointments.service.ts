@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import {
   Appointment,
   AppointmentStatus,
@@ -420,15 +420,20 @@ export class AppointmentsService {
   }
 
   async cancelExpiredPendingAppointments(): Promise<number> {
-    const expirationCutoff = this.getPendingExpirationCutoff();
-
-    const expiredAppointments = await this.appointmentsRepository.find({
-      where: {
-        status: AppointmentStatus.PENDING,
-        paymentStatus: PaymentStatus.PENDING,
-        createdAt: LessThanOrEqual(expirationCutoff),
-      },
-    });
+    const pendingTtlMinutes = this.getPendingTtlMinutes();
+    const expiredAppointments = await this.appointmentsRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.status = :pendingStatus', {
+        pendingStatus: AppointmentStatus.PENDING,
+      })
+      .andWhere('appointment.paymentStatus = :pendingPaymentStatus', {
+        pendingPaymentStatus: PaymentStatus.PENDING,
+      })
+      .andWhere(
+        "appointment.createdAt <= (NOW() - (:pendingTtlMinutes * INTERVAL '1 minute'))",
+        { pendingTtlMinutes },
+      )
+      .getMany();
 
     if (expiredAppointments.length === 0) {
       return 0;
@@ -461,7 +466,7 @@ export class AppointmentsService {
     time: string,
     excludeId?: string,
   ): Promise<void> {
-    const pendingExpirationCutoff = this.getPendingExpirationCutoff();
+    const pendingTtlMinutes = this.getPendingTtlMinutes();
 
     const query = this.appointmentsRepository
       .createQueryBuilder('appointment')
@@ -471,10 +476,10 @@ export class AppointmentsService {
         cancelledStatus: AppointmentStatus.CANCELLED,
       })
       .andWhere(
-        '(appointment.status != :pendingStatus OR appointment.createdAt > :pendingExpirationCutoff)',
+        "(appointment.status != :pendingStatus OR appointment.createdAt > (NOW() - (:pendingTtlMinutes * INTERVAL '1 minute')))",
         {
           pendingStatus: AppointmentStatus.PENDING,
-          pendingExpirationCutoff,
+          pendingTtlMinutes,
         },
       );
 
@@ -629,12 +634,6 @@ export class AppointmentsService {
     }
 
     return Math.floor(parsed);
-  }
-
-  private getPendingExpirationCutoff(referenceDate: Date = new Date()): Date {
-    return new Date(
-      referenceDate.getTime() - this.getPendingTtlMinutes() * 60 * 1000,
-    );
   }
 
   /**

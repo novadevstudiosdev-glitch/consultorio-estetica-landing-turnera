@@ -78,7 +78,7 @@ export class SlotsService {
 
     const blockedSlots = await this.getBlockedSlotsForDate(date);
 
-    const pendingExpirationCutoff = this.getPendingExpirationCutoff();
+    const pendingTtlMinutes = this.getPendingTtlMinutes();
     const existingAppointments = await this.appointmentsRepository
       .createQueryBuilder('appointment')
       .select(['appointment.appointmentTime'])
@@ -87,10 +87,10 @@ export class SlotsService {
         cancelledStatus: AppointmentStatus.CANCELLED,
       })
       .andWhere(
-        '(appointment.status != :pendingStatus OR appointment.createdAt > :pendingExpirationCutoff)',
+        "(appointment.status != :pendingStatus OR appointment.createdAt > (NOW() - (:pendingTtlMinutes * INTERVAL '1 minute')))",
         {
           pendingStatus: AppointmentStatus.PENDING,
-          pendingExpirationCutoff,
+          pendingTtlMinutes,
         },
       )
       .getMany();
@@ -257,11 +257,5 @@ export class SlotsService {
     }
 
     return Math.floor(parsed);
-  }
-
-  private getPendingExpirationCutoff(referenceDate: Date = new Date()): Date {
-    return new Date(
-      referenceDate.getTime() - this.getPendingTtlMinutes() * 60 * 1000,
-    );
   }
 }
