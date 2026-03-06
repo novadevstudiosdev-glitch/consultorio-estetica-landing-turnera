@@ -622,6 +622,11 @@ export class PaymentsService {
       const hasHttpsNotificationUrl = this.isHttpsUrl(notificationUrl);
       const statementDescriptor = this.getStatementDescriptor();
       const accessToken = this.getAccessToken();
+      const unitPrice = Number(giftCard.amount);
+
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        throw new BadRequestException('Monto de gift card invalido');
+      }
 
       const preferenceData: PreferenceRequest = {
         items: [
@@ -629,7 +634,7 @@ export class PaymentsService {
             id: giftCard.id,
             title: `Gift Card - $${giftCard.amount}`,
             quantity: 1,
-            unit_price: giftCard.amount,
+            unit_price: unitPrice,
             currency_id: 'ARS',
           },
         ],

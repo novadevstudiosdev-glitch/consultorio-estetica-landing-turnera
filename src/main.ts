@@ -8,15 +8,15 @@ import { ClassSerializerInterceptor } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  // const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Solo servir archivos estáticos en desarrollo
   if (process.env.NODE_ENV === 'development') {
     // app.useStaticAssets(join(__dirname, '..', 'public'));
-    // app.useStaticAssets(join(__dirname, '..', 'frontend'));
+    app.useStaticAssets(join(__dirname, '..', 'frontend'));
     // console.log('📁 Static files enabled: /public');
-    // console.log('📁 Static files enabled: /frontend');
+    console.log('📁 Static files enabled: /frontend');
   }
 
   // Global prefix for all routes, excluding health, checks and root
