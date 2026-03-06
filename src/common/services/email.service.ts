@@ -161,6 +161,51 @@ export class EmailService {
   }
 
   /**
+   * Enviar email de turno reprogramado
+   */
+  async sendAppointmentRescheduled(
+    email: string,
+    appointmentData: {
+      patientName: string;
+      serviceName: string;
+      previousDate: string;
+      previousTime: string;
+      newDate: string;
+      newTime: string;
+      reason?: string;
+    },
+  ): Promise<void> {
+    if (!this.resend) {
+      this.logger.warn(
+        `📧 [SIMULATED] Appointment rescheduled email to ${email}`,
+      );
+      return;
+    }
+
+    const html = this.getAppointmentRescheduledTemplate(appointmentData);
+
+    try {
+      const { data, error } = await this.resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: email,
+        subject: 'Turno reprogramado - Turnera Médica',
+        html,
+      });
+
+      if (error) throw error;
+
+      this.logger.log(
+        `📧 Appointment rescheduled email sent to ${email} (ID: ${data?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error sending appointment rescheduled email to ${email}:`,
+        error,
+      );
+    }
+  }
+
+  /**
    * Enviar recordatorio de turno (24 horas antes)
    */
   async sendAppointmentReminder(
@@ -595,6 +640,56 @@ export class EmailService {
         </div>
         <p style="margin-top:14px;">Te esperamos 🌸</p>
       `,
+    });
+  }
+
+  private getAppointmentRescheduledTemplate(data: {
+    patientName: string;
+    serviceName: string;
+    previousDate: string;
+    previousTime: string;
+    newDate: string;
+    newTime: string;
+    reason?: string;
+  }): string {
+    return this.getBaseEmailTemplate({
+      preheader: 'Tu turno ha sido reprogramado.',
+      title: 'Turno reprogramado',
+      greetingName: data.patientName,
+      variant: 'warning',
+      introHtml: `<p class="muted">Tu turno ha sido reprogramado con los siguientes cambios:</p>`,
+      bodyHtml: `
+      <div class="infoBox" style="background: #fff9f5;">
+        <p style="margin: 0 0 12px 0; font-weight: bold; color: #e91e63;">📅 Turno Anterior</p>
+        <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+        <p class="infoRow"><strong>Fecha:</strong> ${data.previousDate}</p>
+        <p class="infoRow"><strong>Hora:</strong> ${data.previousTime}</p>
+      </div>
+
+      <div style="text-align: center; margin: 20px 0;">
+        <p style="font-size: 24px; color: #e91e63;">⬇️</p>
+      </div>
+
+      <div class="infoBox" style="background: #f0fff4; border-color: #4caf50;">
+        <p style="margin: 0 0 12px 0; font-weight: bold; color: #4caf50;">📅 Nuevo Turno</p>
+        <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+        <p class="infoRow"><strong>Fecha:</strong> ${data.newDate}</p>
+        <p class="infoRow"><strong>Hora:</strong> ${data.newTime}</p>
+      </div>
+
+      ${
+        data.reason
+          ? `
+      <div class="infoBox">
+        <p class="infoRow" style="margin: 0;"><strong>Motivo:</strong> ${data.reason}</p>
+      </div>
+      `
+          : ''
+      }
+
+      <p style="margin-top: 20px;">Si este cambio no fue solicitado por vos, por favor contactanos de inmediato.</p>
+      <p style="margin-top: 14px;">Te esperamos en la nueva fecha 🌸</p>
+    `,
     });
   }
 

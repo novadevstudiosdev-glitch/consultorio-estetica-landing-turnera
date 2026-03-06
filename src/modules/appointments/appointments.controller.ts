@@ -26,6 +26,7 @@ import {
   UpdateAppointmentDto,
   AdminCreateAppointmentDto,
   CancelAppointmentDto,
+  RescheduleAppointmentDto,
 } from './dto/update-appointment.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
@@ -265,6 +266,24 @@ export class AppointmentsController {
     @Body() updateAppointmentDto: UpdateAppointmentDto,
   ) {
     return await this.appointmentsService.update(id, updateAppointmentDto);
+  }
+
+  @Patch(':id/reschedule')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({
+    summary: 'Reprogramar turno (usuario autenticado o admin)',
+    description:
+      'Permite cambiar fecha y hora de un turno existente. Usuario solo puede reprogramar sus propios turnos.',
+  })
+  @ApiResponse({ status: 200, description: 'Turno reprogramado exitosamente' })
+  @ApiResponse({ status: 404, description: 'Turno no encontrado' })
+  @ApiResponse({ status: 400, description: 'Validación fallida' })
+  async reschedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() rescheduleDto: RescheduleAppointmentDto,
+    @CurrentUser() user?: User,
+  ) {
+    return await this.appointmentsService.reschedule(id, rescheduleDto, user);
   }
 
   @Post(':id/cancel')
