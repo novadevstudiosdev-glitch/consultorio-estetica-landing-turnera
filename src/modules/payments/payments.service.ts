@@ -779,7 +779,7 @@ export class PaymentsService {
   private async getPaymentInfo(paymentId: number): Promise<any> {
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/v1/v1/payments/${paymentId}`,
+        `https://api.mercadopago.com/v1/payments/${paymentId}`,
         {
           headers: {
             Authorization: `Bearer ${this.getAccessToken()}`,
@@ -851,7 +851,7 @@ export class PaymentsService {
 
     try {
       const response = await fetch(
-        `https://api.mercadopago.com/v1/v1/payments/${appointment.paymentId}/refunds`,
+        `https://api.mercadopago.com/v1/payments/${appointment.paymentId}/refunds`,
         {
           method: 'POST',
           headers: {
