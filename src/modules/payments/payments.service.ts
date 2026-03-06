@@ -731,11 +731,27 @@ export class PaymentsService {
       );
     }
 
-    await this.syncAppointmentWithPaymentInfo(
-      paymentId,
-      paymentInfo,
-      'webhook',
-    );
+    const referenceId = paymentInfo.external_reference;
+    const metadata = paymentInfo.metadata;
+
+    if (!referenceId) {
+      throw new BadRequestException('Webhook sin external_reference');
+    }
+
+    // Determinar si es appointment o gift card
+    const isGiftCard = metadata?.type === 'gift_card';
+
+    if (isGiftCard) {
+      // 🎁 Procesar pago de gift card
+      await this.processGiftCardPayment(referenceId, paymentId, paymentInfo);
+    } else {
+      // 📅 Procesar pago de appointment
+      await this.syncAppointmentWithPaymentInfo(
+        paymentId,
+        paymentInfo,
+        'webhook',
+      );
+    }
   }
 
   // Procesar pago de gift card
