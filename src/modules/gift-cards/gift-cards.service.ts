@@ -85,6 +85,20 @@ export class GiftCardsService {
     }
 
     if (paymentStatus === 'approved') {
+      // Mercado Pago puede reenviar notificaciones del mismo pago.
+      // Evitar reprocesar y reenviar el email.
+      if (
+        giftCard.status === GiftCardStatus.ACTIVE &&
+        giftCard.paymentStatus === 'approved' &&
+        giftCard.paymentId === paymentId
+      ) {
+        this.logger.log(
+          `Webhook duplicado ignorado para gift card ${giftCard.code} (paymentId: ${paymentId})`,
+        );
+        return giftCard;
+      }
+
+      const shouldSendEmail = giftCard.status !== GiftCardStatus.ACTIVE;
       const now = new Date();
 
       giftCard.status = GiftCardStatus.ACTIVE;
@@ -95,30 +109,30 @@ export class GiftCardsService {
 
       const activated = await this.giftCardsRepository.save(giftCard);
 
-      // Enviar email con la gift card
-      try {
-        await this.emailService.sendGiftCardEmail(giftCard.recipientEmail, {
-          recipientName: giftCard.recipientName,
-          code: giftCard.code,
-          amount: giftCard.amount,
-          expirationDate: giftCard.expirationDate!.toISOString().split('T')[0],
-          purchaserName: giftCard.purchaserName,
-          personalMessage: giftCard.personalMessage,
-        });
+      if (shouldSendEmail) {
+        try {
+          await this.emailService.sendGiftCardEmail(giftCard.recipientEmail, {
+            recipientName: giftCard.recipientName,
+            code: giftCard.code,
+            amount: giftCard.amount,
+            expirationDate: giftCard.expirationDate!.toISOString().split('T')[0],
+            purchaserName: giftCard.purchaserName,
+            personalMessage: giftCard.personalMessage,
+          });
 
-        this.logger.log(`📧 Gift Card enviada a ${giftCard.recipientEmail}`);
-      } catch (error) {
-        this.logger.error('Error enviando email de gift card:', error);
+          this.logger.log(`Gift Card enviada a ${giftCard.recipientEmail}`);
+        } catch (error) {
+          this.logger.error('Error enviando email de gift card:', error);
+        }
       }
 
-      this.logger.log(`✅ Gift Card activada: ${giftCard.code}`);
+      this.logger.log(`Gift Card activada: ${giftCard.code}`);
       return activated;
-    } else {
-      giftCard.paymentStatus = paymentStatus;
-      return await this.giftCardsRepository.save(giftCard);
     }
-  }
 
+    giftCard.paymentStatus = paymentStatus;
+    return await this.giftCardsRepository.save(giftCard);
+  }
   /**
    * Listar gift cards (admin)
    */
@@ -346,3 +360,4 @@ export class GiftCardsService {
     return stats;
   }
 }
+

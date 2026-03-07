@@ -312,7 +312,7 @@ export class EmailService {
       const { data: emailData, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to,
-        subject: '🎁 ¡Recibiste una Gift Card!',
+        subject: 'Gift Card confirmada - Consultorio Dra. Jaquelina Grassetti',
         html,
       });
 
@@ -808,3 +808,4 @@ export class EmailService {
     });
   }
 }
+
