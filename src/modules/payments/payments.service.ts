@@ -512,7 +512,6 @@ export class PaymentsService {
       appointment = await queryRunner.manager
         .getRepository(Appointment)
         .createQueryBuilder('appointment')
-        .leftJoinAndSelect('appointment.service', 'service')
         .where('appointment.id = :appointmentId', { appointmentId })
         .setLock('pessimistic_write')
         .getOne();
