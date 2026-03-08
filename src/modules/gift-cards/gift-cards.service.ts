@@ -89,8 +89,7 @@ export class GiftCardsService {
       // Evitar reprocesar y reenviar el email.
       if (
         giftCard.status === GiftCardStatus.ACTIVE &&
-        giftCard.paymentStatus === 'approved' &&
-        giftCard.paymentId === paymentId
+        giftCard.paymentStatus === 'approved'
       ) {
         this.logger.log(
           `Webhook duplicado ignorado para gift card ${giftCard.code} (paymentId: ${paymentId})`,
@@ -115,12 +114,34 @@ export class GiftCardsService {
             recipientName: giftCard.recipientName,
             code: giftCard.code,
             amount: giftCard.amount,
-            expirationDate: giftCard.expirationDate!.toISOString().split('T')[0],
+            expirationDate: giftCard
+              .expirationDate!.toISOString()
+              .split('T')[0],
             purchaserName: giftCard.purchaserName,
             personalMessage: giftCard.personalMessage,
           });
 
           this.logger.log(`Gift Card enviada a ${giftCard.recipientEmail}`);
+
+          if (
+            giftCard.purchaserEmail &&
+            giftCard.purchaserEmail !== giftCard.recipientEmail
+          ) {
+            await this.emailService.sendGiftCardPurchaseConfirmation(
+              giftCard.purchaserEmail,
+              {
+                purchaserName: giftCard.purchaserName,
+                recipientName: giftCard.recipientName,
+                code: giftCard.code,
+                amount: Number(giftCard.amount),
+                expirationDate: giftCard.expirationDate!.toISOString().split('T')[0],
+              },
+            );
+
+            this.logger.log(
+              `Confirmacion de compra enviada a ${giftCard.purchaserEmail}`,
+            );
+          }
         } catch (error) {
           this.logger.error('Error enviando email de gift card:', error);
         }
@@ -360,4 +381,3 @@ export class GiftCardsService {
     return stats;
   }
 }
-
