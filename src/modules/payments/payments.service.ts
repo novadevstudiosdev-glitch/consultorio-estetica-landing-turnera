@@ -13,6 +13,7 @@ import {
 } from '../appointments/entities/appointment.entity';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { User } from '../users/entities/user.entity';
+import { WhatsappService } from '../../common/services/whatsapp.service';
 
 interface CreatePaymentDto {
   appointmentId: string;
@@ -34,6 +35,7 @@ export class PaymentsService {
   constructor(
     private configService: ConfigService,
     private appointmentsService: AppointmentsService,
+    private whatsappService: WhatsappService,
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
   ) {
@@ -171,6 +173,25 @@ export class PaymentsService {
     ]
       .filter(Boolean)
       .join(' - ');
+  }
+
+  private didTransitionToConfirmed(
+    previousStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): boolean {
+    return (
+      previousStatus === AppointmentStatus.PENDING &&
+      nextStatus === AppointmentStatus.CONFIRMED
+    );
+  }
+
+  private formatAppointmentDate(date: string | Date): string {
+    if (date instanceof Date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    const raw = String(date ?? '').trim();
+    return raw.length > 0 ? raw : 'Sin fecha';
   }
 
   async createPaymentPreference(
@@ -330,6 +351,9 @@ export class PaymentsService {
           isTestMode: this.isTestAccessToken(accessToken),
         })}`,
       );
+      this.logger.log(
+        `[WA-DIAG][payments.preference] appointmentId=${appointment.id} hasHttpsBackUrls=${hasHttpsBackUrls} hasHttpsNotificationUrl=${hasHttpsNotificationUrl} notificationUrl=${hasHttpsNotificationUrl ? notificationUrl : 'omitted'}`,
+      );
 
       const response = await this.preference.create({ body: preferenceData });
       const isTestMode = this.isTestAccessToken(accessToken);
@@ -486,6 +510,11 @@ export class PaymentsService {
       return false;
     }
 
+    const previousStatus = appointment.status;
+    this.logger.log(
+      `[WA-DIAG][payments.sync] source=${source} appointmentId=${appointmentId} paymentId=${paymentId} previousStatus=${previousStatus} paymentStatusFromMP=${String(paymentInfo?.status ?? '')}`,
+    );
+
     if (
       paymentInfo.status === 'approved' &&
       appointment.status === AppointmentStatus.CANCELLED
@@ -531,12 +560,46 @@ export class PaymentsService {
     }
 
     await this.appointmentsRepository.save(appointment);
+    const transitionedToConfirmed = this.didTransitionToConfirmed(
+      previousStatus,
+      appointment.status,
+    );
+    this.logger.log(
+      `[WA-DIAG][payments.sync] source=${source} appointmentId=${appointmentId} previousStatus=${previousStatus} nextStatus=${appointment.status} transitionedToConfirmed=${transitionedToConfirmed}`,
+    );
+
+    if (transitionedToConfirmed) {
+      try {
+        this.logger.log(
+          `[WA-DIAG][payments.sync] attempting sendAppointmentCreated appointmentId=${appointmentId} patientPhone="${appointment.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,
+        );
+        await this.whatsappService.sendAppointmentCreated({
+          appointmentId,
+          patientName: appointment.patientName,
+          patientPhone: appointment.patientPhone,
+          serviceName: appointment.service?.name ?? 'Turno',
+          date: this.formatAppointmentDate(appointment.appointmentDate),
+          time: appointment.appointmentTime,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Error enviando WhatsApp de confirmacion para turno ${appointmentId}`,
+          error,
+        );
+      }
+    } else {
+      this.logger.log(
+        `[WA-DIAG][payments.sync] skipping sendAppointmentCreated appointmentId=${appointmentId} because transition condition is false`,
+      );
+    }
+
     return true;
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
   async reconcilePendingPaymentsCron(): Promise<void> {
     try {
+      this.logger.log('[WA-DIAG][payments.reconcile.cron] tick');
       await this.reconcilePendingApprovedPayments();
     } catch (error) {
       this.logger.error('Error en reconciliacion de pagos pendientes', error);
@@ -559,6 +622,9 @@ export class PaymentsService {
       .orderBy('appointment.createdAt', 'DESC')
       .take(20)
       .getMany();
+    this.logger.log(
+      `[WA-DIAG][payments.reconcile] pendingAppointments=${pendingAppointments.length}`,
+    );
 
     if (pendingAppointments.length === 0) {
       return 0;
@@ -608,18 +674,30 @@ export class PaymentsService {
       body,
       query,
     );
+    this.logger.log(
+      `[WA-DIAG][payments.webhook] resolvedType=${type ?? 'n/a'} paymentId=${paymentId ?? 'n/a'} payload=${JSON.stringify(payload)}`,
+    );
     this.logger.log(`Webhook recibido: ${JSON.stringify(payload)}`);
 
     if (type && type !== 'payment') {
+      this.logger.log(
+        `[WA-DIAG][payments.webhook] ignoredType=${type ?? 'unknown'} paymentId=${paymentId ?? 'n/a'}`,
+      );
       this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
       return;
     }
 
     if (!paymentId) {
+      this.logger.warn(
+        `[WA-DIAG][payments.webhook] missingPaymentId payload=${JSON.stringify(payload)}`,
+      );
       throw new BadRequestException('Webhook de pago sin id valido');
     }
 
     const paymentInfo = await this.getPaymentInfo(paymentId);
+    this.logger.log(
+      `[WA-DIAG][payments.webhook] paymentId=${paymentId} paymentStatusFromMP=${String(paymentInfo?.status ?? '')} externalReference=${String(paymentInfo?.external_reference ?? '')}`,
+    );
 
     if (!paymentInfo) {
       throw new BadRequestException(
@@ -736,3 +814,4 @@ export class PaymentsService {
     }
   }
 }
+

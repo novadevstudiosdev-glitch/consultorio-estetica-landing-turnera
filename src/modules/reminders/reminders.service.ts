@@ -73,6 +73,7 @@ export class RemindersService {
           }
 
           const whatsappSent = await this.whatsappService.send24HourReminder({
+            appointmentId: appointment.id,
             patientName: appointment.patientName,
             patientPhone: appointment.patientPhone,
             serviceName: appointment.service.name,
@@ -175,6 +176,7 @@ export class RemindersService {
             }
 
             const whatsappSent = await this.whatsappService.send2HourReminder({
+              appointmentId: appointment.id,
               patientName: appointment.patientName,
               patientPhone: appointment.patientPhone,
               serviceName: appointment.service.name,
