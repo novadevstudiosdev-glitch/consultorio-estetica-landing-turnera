@@ -47,7 +47,7 @@ export class GiftCardPdfService {
       // Código de Gift Card (grande, centrado arriba)
       page.drawText(data.code, {
         x: this.centerText(data.code, width, 28, font),
-        y: height - 200, // Ajustar según template
+        y: height - 338.6, // Ajustar según template
         size: 28,
         font: font,
         color: pinkColor,
@@ -57,7 +57,7 @@ export class GiftCardPdfService {
       const amountText = `$${data.amount.toLocaleString('es-AR')}`;
       page.drawText(amountText, {
         x: this.centerText(amountText, width, 35, font),
-        y: height - 260,
+        y: height - 276.9,
         size: 35,
         font: font,
         color: pinkColor,
@@ -66,7 +66,7 @@ export class GiftCardPdfService {
       // Para (beneficiario)
       page.drawText(`Para: ${data.recipientName}`, {
         x: 80,
-        y: height - 340,
+        y: height - 253.7,
         size: 14,
         font: font,
         color: blackColor,
@@ -75,7 +75,7 @@ export class GiftCardPdfService {
       // De (comprador)
       page.drawText(`De: ${data.purchaserName}`, {
         x: 80,
-        y: height - 370,
+        y: height - 212.1,
         size: 14,
         font: font,
         color: blackColor,
@@ -87,99 +87,99 @@ export class GiftCardPdfService {
       ).toLocaleDateString('es-AR');
       page.drawText(`Válida hasta: ${expirationFormatted}`, {
         x: 80,
-        y: height - 400,
+        y: height - 187.3,
         size: 12,
         font: font,
         color: grayColor,
       });
 
-      // Mensaje personalizado (si existe)
-      if (data.personalMessage) {
-        const maxWidth = width - 160; // 80px margen cada lado
-        const wrappedMessage = this.wrapText(
-          data.personalMessage,
-          maxWidth,
-          11,
-          font,
-        );
+      // // Mensaje personalizado (si existe)
+      // if (data.personalMessage) {
+      //   const maxWidth = width - 160; // 80px margen cada lado
+      //   const wrappedMessage = this.wrapText(
+      //     data.personalMessage,
+      //     maxWidth,
+      //     11,
+      //     font,
+      //   );
 
-        let yPosition = height - 450;
-        page.drawText('Mensaje:', {
-          x: 80,
-          y: yPosition,
-          size: 12,
-          font: fontBold,
-          color: blackColor,
-        });
+      //   let yPosition = height - 450;
+      //   page.drawText('Mensaje:', {
+      //     x: 80,
+      //     y: yPosition,
+      //     size: 12,
+      //     font: fontBold,
+      //     color: blackColor,
+      //   });
 
-        yPosition -= 20;
-        wrappedMessage.forEach((line) => {
-          page.drawText(line, {
-            x: 80,
-            y: yPosition,
-            size: 11,
-            font: font,
-            color: grayColor,
-          });
-          yPosition -= 15;
-        });
-      }
+      //   yPosition -= 20;
+      //   wrappedMessage.forEach((line) => {
+      //     page.drawText(line, {
+      //       x: 80,
+      //       y: yPosition,
+      //       size: 11,
+      //       font: font,
+      //       color: grayColor,
+      //     });
+      //     yPosition -= 15;
+      //   });
+      // }
 
-      // Instrucciones de uso (parte inferior)
-      const instructions = [
-        '¿Cómo usar tu Gift Card?',
-        '1. Agendá tu turno por WhatsApp: +54 9 341 7511529',
-        '2. Presentá tu código al agendar',
-        '3. ¡Disfrutá del tratamiento que elijas!',
-      ];
+      // // Instrucciones de uso (parte inferior)
+      // const instructions = [
+      //   '¿Cómo usar tu Gift Card?',
+      //   '1. Agendá tu turno por WhatsApp: +54 9 341 7511529',
+      //   '2. Presentá tu código al agendar',
+      //   '3. ¡Disfrutá del tratamiento que elijas!',
+      // ];
 
-      let yInstructions = 180; // Desde abajo
-      page.drawText(instructions[0], {
-        x: 80,
-        y: yInstructions,
-        size: 12,
-        font: fontBold,
-        color: pinkColor,
-      });
+      // let yInstructions = 180; // Desde abajo
+      // page.drawText(instructions[0], {
+      //   x: 80,
+      //   y: yInstructions,
+      //   size: 12,
+      //   font: fontBold,
+      //   color: pinkColor,
+      // });
 
-      yInstructions -= 25;
-      instructions.slice(1).forEach((instruction) => {
-        page.drawText(instruction, {
-          x: 80,
-          y: yInstructions,
-          size: 10,
-          font: font,
-          color: blackColor,
-        });
-        yInstructions -= 18;
-      });
+      // yInstructions -= 25;
+      // instructions.slice(1).forEach((instruction) => {
+      //   page.drawText(instruction, {
+      //     x: 80,
+      //     y: yInstructions,
+      //     size: 10,
+      //     font: font,
+      //     color: blackColor,
+      //   });
+      //   yInstructions -= 18;
+      // });
 
-      // Condiciones (muy abajo)
-      const conditions = [
-        'Válida por 90 días | No reembolsable | Puede usarse en uno o más tratamientos',
-      ];
+      // // Condiciones (muy abajo)
+      // const conditions = [
+      //   'Válida por 90 días | No reembolsable | Puede usarse en uno o más tratamientos',
+      // ];
 
-      page.drawText(conditions[0], {
-        x: this.centerText(conditions[0], width, 8, font),
-        y: 50,
-        size: 8,
-        font: font,
-        color: grayColor,
-      });
+      // page.drawText(conditions[0], {
+      //   x: this.centerText(conditions[0], width, 8, font),
+      //   y: 50,
+      //   size: 8,
+      //   font: font,
+      //   color: grayColor,
+      // });
 
-      // Footer con contacto
-      page.drawText('Dra. Jaqueline Grassetti | @dra.jaquelinagrassetti', {
-        x: this.centerText(
-          'Dra. Jaqueline Grassetti | @dra.jaquelinagrassetti',
-          width,
-          9,
-          font,
-        ),
-        y: 30,
-        size: 9,
-        font: font,
-        color: grayColor,
-      });
+      // // Footer con contacto
+      // page.drawText('Dra. Jaqueline Grassetti | @dra.jaquelinagrassetti', {
+      //   x: this.centerText(
+      //     'Dra. Jaqueline Grassetti | @dra.jaquelinagrassetti',
+      //     width,
+      //     9,
+      //     font,
+      //   ),
+      //   y: 30,
+      //   size: 9,
+      //   font: font,
+      //   color: grayColor,
+      // });
 
       // Generar PDF final
       const pdfBytes = await pdfDoc.save();
