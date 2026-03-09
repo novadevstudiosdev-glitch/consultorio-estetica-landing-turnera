@@ -47,7 +47,7 @@ export class GiftCardPdfService {
       // Código de Gift Card (grande, centrado arriba)
       page.drawText(data.code, {
         x: this.centerText(data.code, width, 28, font),
-        y: height - 338.6, // Ajustar según template
+        y: height - 187.3, // Ajustar según template
         size: 28,
         font: font,
         color: pinkColor,
@@ -57,7 +57,7 @@ export class GiftCardPdfService {
       const amountText = `$${data.amount.toLocaleString('es-AR')}`;
       page.drawText(amountText, {
         x: this.centerText(amountText, width, 35, font),
-        y: height - 276.9,
+        y: height - 212.1,
         size: 35,
         font: font,
         color: pinkColor,
@@ -75,7 +75,7 @@ export class GiftCardPdfService {
       // De (comprador)
       page.drawText(`De: ${data.purchaserName}`, {
         x: 80,
-        y: height - 212.1,
+        y: height - 276.9,
         size: 14,
         font: font,
         color: blackColor,
@@ -87,7 +87,7 @@ export class GiftCardPdfService {
       ).toLocaleDateString('es-AR');
       page.drawText(`Válida hasta: ${expirationFormatted}`, {
         x: 80,
-        y: height - 187.3,
+        y: height - 338.6,
         size: 12,
         font: font,
         color: grayColor,
