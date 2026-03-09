@@ -5,6 +5,8 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -25,10 +27,12 @@ import {
 } from '../business-hours/entities/business-hours.entity';
 import { BlockedSlot } from '../blocked-slots/entities/blocked-slot.entity';
 import { EmailService } from '../../common/services/email.service';
+import { WhatsappService } from '../../common/services/whatsapp.service';
 
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
+  private static readonly DEFAULT_PENDING_TTL_MINUTES = 15;
 
   constructor(
     @InjectRepository(Appointment)
@@ -37,8 +41,10 @@ export class AppointmentsService {
     private businessHoursRepository: Repository<BusinessHours>,
     @InjectRepository(BlockedSlot)
     private blockedSlotsRepository: Repository<BlockedSlot>,
+    private configService: ConfigService,
     private servicesService: ServicesService,
     private emailService: EmailService,
+    private whatsappService: WhatsappService,
   ) {}
 
   /**
@@ -48,6 +54,8 @@ export class AppointmentsService {
     createAppointmentDto: CreateAppointmentDto,
     userId?: string,
   ): Promise<Appointment> {
+    await this.cancelExpiredPendingAppointments();
+
     // Verificar que el servicio existe
     const service = await this.servicesService.findOne(
       createAppointmentDto.serviceId,
@@ -108,7 +116,6 @@ export class AppointmentsService {
       this.logger.error('Error enviando email de confirmación:', error);
       // No fallar si el email no se envía
     }
-
     return saved;
   }
 
@@ -246,6 +253,7 @@ export class AppointmentsService {
     updateAppointmentDto: UpdateAppointmentDto,
   ): Promise<Appointment> {
     const appointment = await this.findOne(id);
+    const previousStatus = appointment.status;
 
     if (
       updateAppointmentDto.appointmentDate ||
@@ -261,6 +269,34 @@ export class AppointmentsService {
 
     Object.assign(appointment, updateAppointmentDto);
     const updated = await this.appointmentsRepository.save(appointment);
+    const transitionedToConfirmed = this.didTransitionToConfirmed(
+      previousStatus,
+      updated.status,
+    );
+    this.logger.log(
+      `[WA-DIAG][appointments.update] appointmentId=${updated.id} previousStatus=${previousStatus} nextStatus=${updated.status} transitionedToConfirmed=${transitionedToConfirmed}`,
+    );
+
+    if (transitionedToConfirmed) {
+      try {
+        this.logger.log(
+          `[WA-DIAG][appointments.update] attempting sendAppointmentCreated appointmentId=${updated.id} patientPhone="${updated.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,
+        );
+        await this.whatsappService.sendAppointmentCreated({
+          appointmentId: updated.id,
+          patientName: updated.patientName,
+          patientPhone: updated.patientPhone,
+          serviceName: updated.service?.name ?? 'Turno',
+          date: this.formatAppointmentDate(updated.appointmentDate),
+          time: updated.appointmentTime,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Error enviando WhatsApp por cambio de estado a confirmado para turno ${updated.id}`,
+          error,
+        );
+      }
+    }
 
     this.logger.log(`Turno actualizado: ${updated.id}`);
     return updated;
@@ -275,6 +311,7 @@ export class AppointmentsService {
     cancelledBy: 'admin' | 'patient' = 'patient',
   ): Promise<Appointment> {
     const appointment = await this.findOne(id);
+    const previousStatus = appointment.status;
 
     if (appointment.status === AppointmentStatus.CANCELLED) {
       throw new BadRequestException('El turno ya está cancelado');
@@ -290,6 +327,11 @@ export class AppointmentsService {
     appointment.cancelledAt = new Date();
 
     const cancelled = await this.appointmentsRepository.save(appointment);
+    const transitionedFromConfirmedToCancelled =
+      this.didTransitionFromConfirmedToCancelled(previousStatus, cancelled.status);
+    this.logger.log(
+      `[WA-DIAG][appointments.cancel] appointmentId=${cancelled.id} previousStatus=${previousStatus} nextStatus=${cancelled.status} transitionedFromConfirmedToCancelled=${transitionedFromConfirmedToCancelled}`,
+    );
 
     this.logger.log(`Turno cancelado por ${cancelledBy}: ${cancelled.id}`);
 
@@ -307,6 +349,27 @@ export class AppointmentsService {
       );
     } catch (error) {
       this.logger.error('Error enviando email de cancelación:', error);
+    }
+    if (transitionedFromConfirmedToCancelled) {
+      try {
+        this.logger.log(
+          `[WA-DIAG][appointments.cancel] attempting sendAppointmentCancelled appointmentId=${cancelled.id} patientPhone="${cancelled.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,
+        );
+        await this.whatsappService.sendAppointmentCancelled({
+          appointmentId: cancelled.id,
+          patientName: cancelled.patientName,
+          patientPhone: cancelled.patientPhone,
+          serviceName: cancelled.service.name,
+          date: this.formatAppointmentDate(cancelled.appointmentDate),
+          time: cancelled.appointmentTime,
+          cancellationReason,
+        });
+      } catch (error) {
+        this.logger.error(
+          'Error enviando WhatsApp de cancelación de turno al cliente/doctora:',
+          error,
+        );
+      }
     }
 
     // Procesar reembolso si aplica
@@ -404,6 +467,54 @@ export class AppointmentsService {
     };
   }
 
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handlePendingExpirationCron(): Promise<void> {
+    try {
+      await this.cancelExpiredPendingAppointments();
+    } catch (error) {
+      this.logger.error('Error cancelando turnos pendientes vencidos', error);
+    }
+  }
+
+  async cancelExpiredPendingAppointments(): Promise<number> {
+    const pendingTtlMinutes = this.getPendingTtlMinutes();
+    const expiredAppointments = await this.appointmentsRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.status = :pendingStatus', {
+        pendingStatus: AppointmentStatus.PENDING,
+      })
+      .andWhere('appointment.paymentStatus = :pendingPaymentStatus', {
+        pendingPaymentStatus: PaymentStatus.PENDING,
+      })
+      .andWhere(
+        "appointment.createdAt <= (NOW() - (:pendingTtlMinutes * INTERVAL '1 minute'))",
+        { pendingTtlMinutes },
+      )
+      .getMany();
+
+    if (expiredAppointments.length === 0) {
+      return 0;
+    }
+
+    const now = new Date();
+    const reason = `Reserva vencida automaticamente por falta de pago (${this.getPendingTtlMinutes()} minutos)`;
+
+    for (const appointment of expiredAppointments) {
+      appointment.status = AppointmentStatus.CANCELLED;
+      appointment.cancellationReason = reason;
+      appointment.cancelledBy = 'system';
+      appointment.cancelledAt = now;
+    }
+
+    await this.appointmentsRepository.save(expiredAppointments);
+
+    this.logger.log(
+      `Turnos pendientes vencidos cancelados: ${expiredAppointments.length}`,
+    );
+
+    return expiredAppointments.length;
+  }
+
   /**
    * Validar disponibilidad de slot
    */
@@ -412,13 +523,22 @@ export class AppointmentsService {
     time: string,
     excludeId?: string,
   ): Promise<void> {
+    const pendingTtlMinutes = this.getPendingTtlMinutes();
+
     const query = this.appointmentsRepository
       .createQueryBuilder('appointment')
       .where('appointment.appointmentDate = :date', { date })
       .andWhere('appointment.appointmentTime = :time', { time })
       .andWhere('appointment.status != :cancelledStatus', {
         cancelledStatus: AppointmentStatus.CANCELLED,
-      });
+      })
+      .andWhere(
+        "(appointment.status != :pendingStatus OR appointment.createdAt > (NOW() - (:pendingTtlMinutes * INTERVAL '1 minute')))",
+        {
+          pendingStatus: AppointmentStatus.PENDING,
+          pendingTtlMinutes,
+        },
+      );
 
     if (excludeId) {
       query.andWhere('appointment.id != :excludeId', { excludeId });
@@ -440,8 +560,7 @@ export class AppointmentsService {
     date: string,
     time: string,
   ): Promise<void> {
-    const dateObj = new Date(date);
-    const dayOfWeek = this.getDayOfWeek(dateObj);
+    const dayOfWeek = this.getDayOfWeek(date);
 
     const businessHours = await this.businessHoursRepository.findOne({
       where: {
@@ -457,7 +576,22 @@ export class AppointmentsService {
     }
 
     // Verificar que la hora esté dentro del horario de atención
-    if (time < businessHours.openTime || time >= businessHours.closeTime) {
+    const selectedTimeMinutes = this.timeToMinutes(this.normalizeTime(time));
+    const openTimeMinutes = this.timeToMinutes(businessHours.openTime);
+    const closeTimeMinutes = this.timeToMinutes(businessHours.closeTime);
+
+    if (
+      selectedTimeMinutes === null ||
+      openTimeMinutes === null ||
+      closeTimeMinutes === null
+    ) {
+      throw new BadRequestException('Horario invalido');
+    }
+
+    if (
+      selectedTimeMinutes < openTimeMinutes ||
+      selectedTimeMinutes >= closeTimeMinutes
+    ) {
       throw new BadRequestException(
         `El horario seleccionado está fuera del horario de atención (${businessHours.openTime} - ${businessHours.closeTime})`,
       );
@@ -468,6 +602,12 @@ export class AppointmentsService {
    * Validar slots bloqueados (Fase 2)
    */
   private async validateNotBlocked(date: string, time: string): Promise<void> {
+    const selectedTimeMinutes = this.timeToMinutes(this.normalizeTime(time));
+
+    if (selectedTimeMinutes === null) {
+      throw new BadRequestException('Horario invalido');
+    }
+
     const blockedSlots = await this.blockedSlotsRepository.find({
       where: {
         blockedDate: date as any,
@@ -484,7 +624,17 @@ export class AppointmentsService {
       }
 
       // Verificar si el slot está dentro del rango bloqueado
-      if (time >= blocked.startTime && time < blocked.endTime) {
+      const blockedStartMinutes = this.timeToMinutes(blocked.startTime);
+      const blockedEndMinutes = this.timeToMinutes(blocked.endTime);
+
+      if (blockedStartMinutes === null || blockedEndMinutes === null) {
+        continue;
+      }
+
+      if (
+        selectedTimeMinutes >= blockedStartMinutes &&
+        selectedTimeMinutes < blockedEndMinutes
+      ) {
         throw new BadRequestException(
           `El horario ${time} está bloqueado: ${blocked.reason || 'No disponible'}`,
         );
@@ -494,6 +644,86 @@ export class AppointmentsService {
 
   /**
    * Obtener día de la semana (sin conversión de timezone)
+   */
+  /**
+   * Normalize HH:mm:ss to HH:mm.
+   */
+  private normalizeTime(time?: string): string {
+    if (!time) {
+      return '';
+    }
+
+    const [hours = '', minutes = ''] = time.trim().split(':');
+    return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+  }
+
+  private timeToMinutes(time?: string): number | null {
+    if (!time) {
+      return null;
+    }
+
+    const [hoursRaw, minutesRaw] = time.trim().split(':');
+    const hours = Number(hoursRaw);
+    const minutes = Number(minutesRaw);
+
+    if (
+      !Number.isInteger(hours) ||
+      !Number.isInteger(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      return null;
+    }
+
+    return hours * 60 + minutes;
+  }
+
+  private formatAppointmentDate(date: string | Date): string {
+    if (date instanceof Date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    const raw = String(date ?? '').trim();
+    return raw.length > 0 ? raw : 'Sin fecha';
+  }
+
+  private didTransitionToConfirmed(
+    previousStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): boolean {
+    return (
+      previousStatus === AppointmentStatus.PENDING &&
+      nextStatus === AppointmentStatus.CONFIRMED
+    );
+  }
+
+  private didTransitionFromConfirmedToCancelled(
+    previousStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): boolean {
+    return (
+      previousStatus === AppointmentStatus.CONFIRMED &&
+      nextStatus === AppointmentStatus.CANCELLED
+    );
+  }
+
+  private getPendingTtlMinutes(): number {
+    const raw =
+      this.configService.get<string>('PENDING_APPOINTMENT_TTL_MINUTES') ??
+      AppointmentsService.DEFAULT_PENDING_TTL_MINUTES.toString();
+    const parsed = Number(raw);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return AppointmentsService.DEFAULT_PENDING_TTL_MINUTES;
+    }
+
+    return Math.floor(parsed);
+  }
+
+  /**
+   * Obtener dÃ­a de la semana (sin conversiÃ³n de timezone)
    */
   private getDayOfWeek(dateString: string | Date): DayOfWeek {
     let date: Date;

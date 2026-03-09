@@ -52,7 +52,7 @@
     "reflect-metadata": "^0.2.2",
     "resend": "^6.9.2",
     "rxjs": "^7.8.1",
-    "twilio": "^5.12.1",
+    "twilio": "^5.12.2",
     "typeorm": "^0.3.28",
     "uuid": "^13.0.0"
   },

@@ -145,8 +145,8 @@ export class BlockedSlotsService {
     type: BlockedSlotType,
     reason?: string,
   ): Promise<BlockedSlot[]> {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = this.parseLocalDate(startDate);
+    const end = this.parseLocalDate(endDate);
 
     if (end < start) {
       throw new BadRequestException(
@@ -158,7 +158,7 @@ export class BlockedSlotsService {
     const currentDate = new Date(start);
 
     while (currentDate <= end) {
-      const dateStr = currentDate.toISOString().split('T')[0];
+      const dateStr = this.formatLocalDate(currentDate);
 
       const blockedSlot = this.blockedSlotsRepository.create({
         blockedDate: dateStr as any,
@@ -177,5 +177,17 @@ export class BlockedSlotsService {
       `Rango bloqueado: ${startDate} a ${endDate} (${created.length} días)`,
     );
     return created;
+  }
+
+  private parseLocalDate(value: string): Date {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+
+  private formatLocalDate(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 }

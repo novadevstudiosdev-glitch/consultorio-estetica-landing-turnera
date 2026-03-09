@@ -14,7 +14,9 @@ async function bootstrap() {
   // Solo servir archivos estáticos en desarrollo
   if (process.env.NODE_ENV === 'development') {
     // app.useStaticAssets(join(__dirname, '..', 'public'));
-    console.log('📁 Static files enabled: /public');
+    // app.useStaticAssets(join(__dirname, '..', 'frontend'));
+    // console.log('📁 Static files enabled: /public');
+    // console.log('📁 Static files enabled: /frontend');
   }
 
   // Global prefix for all routes, excluding health, checks and root
@@ -23,10 +25,11 @@ async function bootstrap() {
   });
 
   // CORS
-  app.enableCors({
-    origin: process.env.CORS_ORIGINS?.split(','),
-    credentials: true,
-  });
+  // app.enableCors({
+  //   origin: process.env.CORS_ORIGINS?.split(','),
+  //   credentials: true,
+  // });
+  app.enableCors();
 
   // Validation pipe
   app.useGlobalPipes(

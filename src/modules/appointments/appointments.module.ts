@@ -9,6 +9,7 @@ import { BusinessHours } from '../business-hours/entities/business-hours.entity'
 import { BlockedSlot } from '../blocked-slots/entities/blocked-slot.entity';
 import { SlotsService } from './slots.service';
 import { EmailService } from '@/common/services/email.service';
+import { WhatsappService } from '@/common/services/whatsapp.service';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { EmailService } from '@/common/services/email.service';
     ServicesModule, // Importar para usar ServicesService
   ],
   controllers: [AppointmentsController],
-  providers: [AppointmentsService, SlotsService, EmailService],
+  providers: [AppointmentsService, SlotsService, EmailService, WhatsappService],
   exports: [AppointmentsService, SlotsService], // Exportar para usar en otros módulos
 })
 export class AppointmentsModule {}

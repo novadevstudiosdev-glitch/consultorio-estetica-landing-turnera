@@ -1,48 +1,50 @@
-// PRIMERO: Instalar SDK de Mercado Pago
-// npm install mercadopago
-
-// src/modules/payments/payments.service.ts
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
+import type { PreferenceRequest } from 'mercadopago/dist/clients/preference/commonTypes';
 import {
   Appointment,
+  AppointmentStatus,
   PaymentStatus,
   PaymentMethod,
 } from '../appointments/entities/appointment.entity';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { User } from '../users/entities/user.entity';
+import { WhatsappService } from '../../common/services/whatsapp.service';
 
 interface CreatePaymentDto {
   appointmentId: string;
   amount: number;
   description: string;
-  payer: {
-    email: string;
-    name: string;
+  payer?: {
+    email?: string;
+    name?: string;
   };
 }
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
+  private static readonly DEFAULT_PENDING_TTL_MINUTES = 15;
   private mercadopago: MercadoPagoConfig;
   private preference: Preference;
 
   constructor(
     private configService: ConfigService,
     private appointmentsService: AppointmentsService,
+    private whatsappService: WhatsappService,
+    private dataSource: DataSource,
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
   ) {
-    const accessToken = this.configService.get<string>(
-      'MERCADOPAGO_ACCESS_TOKEN',
-    );
+    const accessToken = this.getAccessToken();
 
     if (!accessToken) {
       this.logger.warn(
-        '⚠️ MERCADOPAGO_ACCESS_TOKEN no configurado. Pagos deshabilitados.',
+        'MERCADOPAGO_ACCESS_TOKEN no configurado. Pagos deshabilitados.',
       );
       return;
     }
@@ -53,174 +55,746 @@ export class PaymentsService {
         options: { timeout: 5000 },
       });
       this.preference = new Preference(this.mercadopago);
-      this.logger.log('✅ Mercado Pago inicializado correctamente');
+      this.logger.log('Mercado Pago inicializado correctamente');
     } catch (error) {
-      this.logger.error('❌ Error inicializando Mercado Pago:', error);
+      this.logger.error('Error inicializando Mercado Pago', error);
     }
   }
 
-  /**
-   * Crear preferencia de pago para un turno
-   */
-  async createPaymentPreference(createPaymentDto: CreatePaymentDto): Promise<{
+  private getAccessToken(): string | undefined {
+    return (
+      this.configService.get<string>('MERCADOPAGO_ACCESS_TOKEN') ??
+      this.configService.get<string>('MP_ACCESS_TOKEN')
+    );
+  }
+
+  private isTestAccessToken(accessToken?: string): boolean {
+    return /^TEST-/i.test(accessToken ?? '');
+  }
+
+  private isTestPayerEmail(email?: string): boolean {
+    return /@testuser\.com$/i.test(email ?? '');
+  }
+
+  private getConfiguredTestPayerEmail(): string | undefined {
+    return this.configService.get<string>('MP_TEST_PAYER_EMAIL')?.trim();
+  }
+
+  private shouldPreferAccountMoney(): boolean {
+    const raw = this.configService
+      .get<string>('MP_PREFER_ACCOUNT_MONEY')
+      ?.trim()
+      .toLowerCase();
+
+    if (!raw) {
+      return true;
+    }
+
+    return !['0', 'false', 'no', 'off'].includes(raw);
+  }
+
+  private normalizeEmail(email?: string): string | undefined {
+    const normalized = email?.trim().toLowerCase();
+    return normalized || undefined;
+  }
+
+  private normalizeBaseUrl(url?: string): string | undefined {
+    if (!url) {
+      return undefined;
+    }
+
+    const normalized = url.replace(/\/+$/, '');
+
+    if (/^https?:\/\//i.test(normalized)) {
+      return normalized;
+    }
+
+    const protocol = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalized)
+      ? 'http'
+      : 'https';
+
+    return `${protocol}://${normalized}`;
+  }
+
+  private isHttpsUrl(url?: string): boolean {
+    return !!url && /^https:\/\//i.test(url);
+  }
+
+  private getStatementDescriptor(): string | undefined {
+    const rawDescriptor =
+      this.configService.get<string>('MP_STATEMENT_DESCRIPTOR') ?? 'TURNERA';
+
+    const normalized = rawDescriptor
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9 ]/g, '')
+      .trim()
+      .slice(0, 13);
+
+    return normalized || undefined;
+  }
+
+  private getPendingTtlMinutes(): number {
+    const raw =
+      this.configService.get<string>('PENDING_APPOINTMENT_TTL_MINUTES') ??
+      PaymentsService.DEFAULT_PENDING_TTL_MINUTES.toString();
+    const parsed = Number(raw);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return PaymentsService.DEFAULT_PENDING_TTL_MINUTES;
+    }
+
+    return Math.floor(parsed);
+  }
+
+  private getMercadoPagoErrorDetails(error: unknown): string {
+    const mpError = error as any;
+    const apiResponse = mpError?.api_response;
+    const apiData = apiResponse?.data;
+    const apiCause = Array.isArray(apiData?.cause)
+      ? apiData.cause
+          .map((cause: any) => cause?.description || cause?.code)
+          .filter(Boolean)
+          .join('; ')
+      : undefined;
+    const sdkCause = Array.isArray(mpError?.cause)
+      ? mpError.cause
+          .map((cause: any) => cause?.description || cause?.code || cause)
+          .filter(Boolean)
+          .join('; ')
+      : undefined;
+
+    return [
+      apiData?.message,
+      apiData?.error,
+      apiCause,
+      mpError?.message,
+      sdkCause,
+      apiResponse?.status ? `HTTP ${apiResponse.status}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(' - ');
+  }
+
+  private didTransitionToConfirmed(
+    previousStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): boolean {
+    return (
+      previousStatus === AppointmentStatus.PENDING &&
+      nextStatus === AppointmentStatus.CONFIRMED
+    );
+  }
+
+  private formatAppointmentDate(date: string | Date): string {
+    if (date instanceof Date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    const raw = String(date ?? '').trim();
+    return raw.length > 0 ? raw : 'Sin fecha';
+  }
+
+  async createPaymentPreference(
+    createPaymentDto: CreatePaymentDto,
+    user?: Pick<User, 'email' | 'fullName'>,
+  ): Promise<{
     preferenceId: string;
     initPoint: string;
     sandboxInitPoint: string;
+    checkoutUrl: string;
   }> {
     if (!this.preference) {
-      throw new BadRequestException('Mercado Pago no está configurado');
+      throw new BadRequestException('Mercado Pago no esta configurado');
     }
 
+    const accessToken = this.getAccessToken();
     const appointment = await this.appointmentsService.findOne(
       createPaymentDto.appointmentId,
     );
+    const depositAmount = Number(appointment.service?.depositAmount ?? 0);
+    const paymentDescription = appointment.service?.name
+      ? `Reserva de ${appointment.service.name}`
+      : 'Reserva de turno';
+
+    if (!Number.isFinite(depositAmount) || depositAmount <= 0) {
+      throw new BadRequestException(
+        'El turno no tiene una sena valida para cobrar',
+      );
+    }
 
     try {
-      const preferenceData = {
+      const successUrl =
+        this.configService.get<string>('MP_SUCCESS_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/success.html`;
+      const failureUrl =
+        this.configService.get<string>('MP_FAILURE_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/failure.html`;
+      const pendingUrl =
+        this.configService.get<string>('MP_PENDING_URL') ??
+        `${this.configService.get('FRONTEND_URL')}/payments/pending.html`;
+      const notificationUrl = `${this.normalizeBaseUrl(this.configService.get('BACKEND_URL'))}/${this.configService.get('API_PREFIX') || 'api'}/payments/webhook`;
+      const hasHttpsBackUrls =
+        this.isHttpsUrl(successUrl) &&
+        this.isHttpsUrl(failureUrl) &&
+        this.isHttpsUrl(pendingUrl);
+      const hasHttpsNotificationUrl = this.isHttpsUrl(notificationUrl);
+      const statementDescriptor = this.getStatementDescriptor();
+      const preferenceData: PreferenceRequest = {
         items: [
           {
             id: appointment.id,
-            title: createPaymentDto.description,
+            title: paymentDescription,
             quantity: 1,
-            unit_price: createPaymentDto.amount,
+            unit_price: depositAmount,
             currency_id: 'ARS',
           },
         ],
-        payer: {
-          name: createPaymentDto.payer.name,
-          email: createPaymentDto.payer.email,
-        },
-        back_urls: {
-          success: `${this.configService.get('FRONTEND_URL')}/payment/success`,
-          failure: `${this.configService.get('FRONTEND_URL')}/payment/failure`,
-          pending: `${this.configService.get('FRONTEND_URL')}/payment/pending`,
-        },
-        auto_return: 'approved' as const,
-        notification_url: `${this.configService.get('BACKEND_URL')}/api/v1/payments/webhook`,
-        external_reference: appointment.id, // Para identificar el turno en el webhook
-        statement_descriptor: 'TURNERA MEDICA',
+        external_reference: appointment.id,
         metadata: {
           appointment_id: appointment.id,
           patient_name: appointment.patientName,
         },
       };
 
-      const response = await this.preference.create({ body: preferenceData });
+      if (this.shouldPreferAccountMoney()) {
+        preferenceData.payment_methods = {
+          default_payment_method_id: 'account_money',
+        };
+      }
+
+      const requestedPayerEmail = this.normalizeEmail(
+        createPaymentDto.payer?.email,
+      );
+      const authenticatedPayerEmail = this.normalizeEmail(user?.email);
+      const configuredTestPayerEmail = this.normalizeEmail(
+        this.getConfiguredTestPayerEmail(),
+      );
+      const payerEmailCandidate =
+        authenticatedPayerEmail ?? requestedPayerEmail;
+      const payerName =
+        createPaymentDto.payer?.name?.trim() ||
+        user?.fullName?.trim() ||
+        appointment.patientName;
+
+      if (
+        authenticatedPayerEmail &&
+        requestedPayerEmail &&
+        authenticatedPayerEmail !== requestedPayerEmail
+      ) {
+        this.logger.warn(
+          `Se ignora payer.email del body (${requestedPayerEmail}) para el turno ${appointment.id} y se usa el email autenticado (${authenticatedPayerEmail}).`,
+        );
+      }
+
+      const payerEmail = this.isTestAccessToken(accessToken)
+        ? this.isTestPayerEmail(payerEmailCandidate)
+          ? payerEmailCandidate
+          : configuredTestPayerEmail
+        : payerEmailCandidate;
+
+      if (payerEmail) {
+        preferenceData.payer = {
+          name: payerName,
+          email: payerEmail,
+        };
+      } else {
+        this.logger.warn(
+          `No se pudo resolver un payer.email valido para el turno ${appointment.id}. Se omite payer para evitar errores de checkout.`,
+        );
+      }
+
+      if (hasHttpsBackUrls) {
+        preferenceData.back_urls = {
+          success: successUrl,
+          failure: failureUrl,
+          pending: pendingUrl,
+        };
+        preferenceData.auto_return = 'approved';
+      } else {
+        this.logger.warn(
+          'Mercado Pago requiere back_urls HTTPS. Se omiten en este entorno.',
+        );
+      }
+
+      if (hasHttpsNotificationUrl) {
+        preferenceData.notification_url = notificationUrl;
+      } else {
+        this.logger.warn(
+          'Mercado Pago requiere notification_url HTTPS. Se omite en este entorno.',
+        );
+      }
+
+      if (statementDescriptor) {
+        preferenceData.statement_descriptor = statementDescriptor;
+      }
+
+      const now = new Date();
+      const expirationDateTo = new Date(
+        now.getTime() + this.getPendingTtlMinutes() * 60 * 1000,
+      );
+      preferenceData.expires = true;
+      preferenceData.expiration_date_from = now.toISOString();
+      preferenceData.expiration_date_to = expirationDateTo.toISOString();
 
       this.logger.log(
-        `💰 Preferencia creada para turno ${appointment.id}: ${response.id}`,
+        `Creando preferencia MP: ${JSON.stringify({
+          appointmentId: appointment.id,
+          depositAmount,
+          paymentDescription,
+          payerEmail: preferenceData.payer?.email ?? null,
+          defaultPaymentMethodId:
+            preferenceData.payment_methods?.default_payment_method_id ?? null,
+          successUrl,
+          failureUrl,
+          pendingUrl,
+          notificationUrl: hasHttpsNotificationUrl ? notificationUrl : null,
+          isTestMode: this.isTestAccessToken(accessToken),
+        })}`,
+      );
+      this.logger.log(
+        `[WA-DIAG][payments.preference] appointmentId=${appointment.id} hasHttpsBackUrls=${hasHttpsBackUrls} hasHttpsNotificationUrl=${hasHttpsNotificationUrl} notificationUrl=${hasHttpsNotificationUrl ? notificationUrl : 'omitted'}`,
+      );
+
+      const response = await this.preference.create({ body: preferenceData });
+      const isTestMode = this.isTestAccessToken(accessToken);
+      const checkoutUrl = isTestMode
+        ? (response.sandbox_init_point ?? response.init_point)
+        : (response.init_point ?? response.sandbox_init_point);
+
+      if (!response.id || !checkoutUrl) {
+        this.logger.error(
+          `Mercado Pago devolvio una preferencia incompleta: ${JSON.stringify({
+            id: response.id,
+            initPoint: response.init_point,
+            sandboxInitPoint: response.sandbox_init_point,
+          })}`,
+        );
+        throw new BadRequestException(
+          'Mercado Pago devolvio una preferencia sin URL de checkout',
+        );
+      }
+
+      this.logger.log(
+        `Preferencia MP creada: ${JSON.stringify({
+          appointmentId: appointment.id,
+          preferenceId: response.id,
+          initPoint: response.init_point,
+          sandboxInitPoint: response.sandbox_init_point,
+          checkoutUrl,
+        })}`,
       );
 
       return {
-        preferenceId: response.id!,
-        initPoint: response.init_point!,
-        sandboxInitPoint: response.sandbox_init_point!,
+        preferenceId: response.id,
+        initPoint: response.init_point ?? '',
+        sandboxInitPoint: response.sandbox_init_point ?? '',
+        checkoutUrl,
       };
     } catch (error) {
-      this.logger.error('❌ Error creando preferencia de pago:', error);
-      throw new BadRequestException('Error al crear preferencia de pago');
+      const details = this.getMercadoPagoErrorDetails(error);
+
+      this.logger.error(
+        `Error creando preferencia de pago para turno ${appointment.id}: ${details || 'sin detalle'}`,
+      );
+
+      throw new BadRequestException(
+        details
+          ? `Error al crear preferencia de pago: ${details}`
+          : 'Error al crear preferencia de pago',
+      );
     }
   }
 
-  /**
-   * Procesar webhook de Mercado Pago
-   */
-  async processWebhook(body: any): Promise<void> {
-    this.logger.log(`📨 Webhook recibido: ${JSON.stringify(body)}`);
+  private parsePaymentId(rawValue: unknown): number | null {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null;
+    }
+    return Math.floor(parsed);
+  }
 
-    const { type, data } = body;
+  private parsePaymentIdFromResource(resource?: unknown): number | null {
+    if (typeof resource !== 'string' || resource.trim() === '') {
+      return null;
+    }
 
-    if (type === 'payment') {
-      const paymentId = data.id;
+    const match = resource.match(/\/payments\/(\d+)(?:\D|$)/i);
+    if (!match?.[1]) {
+      return null;
+    }
 
-      try {
-        // Obtener información del pago
-        const paymentInfo = await this.getPaymentInfo(paymentId);
+    return this.parsePaymentId(match[1]);
+  }
 
-        if (!paymentInfo) {
-          this.logger.warn(`⚠️ No se pudo obtener info del pago ${paymentId}`);
-          return;
-        }
+  private resolveWebhookPaymentData(
+    body?: unknown,
+    query?: Record<string, unknown>,
+  ): {
+    type?: string;
+    paymentId?: number;
+    payload: Record<string, unknown>;
+  } {
+    const bodyRecord =
+      body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const queryRecord = query ?? {};
 
-        // Obtener el turno desde external_reference
-        const appointmentId = paymentInfo.external_reference;
+    const bodyData =
+      bodyRecord.data && typeof bodyRecord.data === 'object'
+        ? (bodyRecord.data as Record<string, unknown>)
+        : undefined;
 
-        if (!appointmentId) {
-          this.logger.warn('⚠️ Webhook sin external_reference');
-          return;
-        }
+    const rawTypeCandidate =
+      bodyRecord.type ??
+      bodyRecord.topic ??
+      bodyRecord.action ??
+      queryRecord.type ??
+      queryRecord.topic ??
+      queryRecord.action;
 
-        const appointment =
-          await this.appointmentsService.findOne(appointmentId);
+    let normalizedType: string | undefined;
+    if (typeof rawTypeCandidate === 'string' && rawTypeCandidate.trim() !== '') {
+      const typeValue = rawTypeCandidate.trim().toLowerCase();
+      normalizedType = typeValue.startsWith('payment') ? 'payment' : typeValue;
+    }
 
-        // Actualizar estado según el status del pago
-        switch (paymentInfo.status) {
-          case 'approved':
-            appointment.paymentStatus = PaymentStatus.PAID;
-            appointment.paymentMethod = PaymentMethod.MP;
-            appointment.paymentId = paymentId.toString();
-            appointment.depositPaid = paymentInfo.transaction_amount;
-            this.logger.log(`✅ Pago aprobado para turno ${appointmentId}`);
-            break;
+    const paymentIdCandidates: unknown[] = [
+      bodyData?.id,
+      bodyRecord['data.id'],
+      bodyRecord.id,
+      queryRecord['data.id'],
+      queryRecord.id,
+      this.parsePaymentIdFromResource(bodyRecord.resource),
+      this.parsePaymentIdFromResource(queryRecord.resource),
+    ];
 
-          case 'pending':
-          case 'in_process':
-            appointment.paymentStatus = PaymentStatus.PENDING;
-            this.logger.log(`⏳ Pago pendiente para turno ${appointmentId}`);
-            break;
-
-          case 'rejected':
-          case 'cancelled':
-            appointment.paymentStatus = PaymentStatus.PENDING;
-            this.logger.log(`❌ Pago rechazado para turno ${appointmentId}`);
-            break;
-
-          case 'refunded':
-            appointment.paymentStatus = PaymentStatus.REFUNDED;
-            this.logger.log(`💸 Pago reembolsado para turno ${appointmentId}`);
-            break;
-        }
-
-        await this.appointmentsRepository.save(appointment);
-
-        // TODO: Enviar email de confirmación si el pago fue aprobado
-      } catch (error) {
-        this.logger.error(
-          `❌ Error procesando webhook para pago ${paymentId}:`,
-          error,
-        );
+    let paymentId: number | undefined;
+    for (const candidate of paymentIdCandidates) {
+      const parsed = this.parsePaymentId(candidate);
+      if (parsed) {
+        paymentId = parsed;
+        break;
       }
     }
+
+    return {
+      type: normalizedType,
+      paymentId,
+      payload: {
+        body: bodyRecord,
+        query: queryRecord,
+      },
+    };
   }
 
-  /**
-   * Obtener información de un pago
-   */
+  private async syncAppointmentWithPaymentInfo(
+    paymentId: number,
+    paymentInfo: any,
+    source: 'webhook' | 'reconcile',
+  ): Promise<boolean> {
+    const appointmentId = String(paymentInfo?.external_reference ?? '').trim();
+
+    if (!appointmentId) {
+      this.logger.warn(
+        `Pago ${paymentId} sin external_reference. Origen: ${source}.`,
+      );
+      return false;
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    let appointment: Appointment | null = null;
+    let previousStatus: AppointmentStatus | null = null;
+
+    try {
+      appointment = await queryRunner.manager
+        .getRepository(Appointment)
+        .createQueryBuilder('appointment')
+        .where('appointment.id = :appointmentId', { appointmentId })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!appointment) {
+        this.logger.warn(
+          `No se encontro turno para external_reference ${appointmentId}. Origen: ${source}.`,
+        );
+        return false;
+      }
+
+      previousStatus = appointment.status;
+      this.logger.log(
+        `[WA-DIAG][payments.sync] source=${source} appointmentId=${appointmentId} paymentId=${paymentId} previousStatus=${previousStatus} paymentStatusFromMP=${String(paymentInfo?.status ?? '')}`,
+      );
+
+      if (
+        paymentInfo.status === 'approved' &&
+        appointment.status === AppointmentStatus.CANCELLED
+      ) {
+        this.logger.warn(
+          `Pago aprobado para turno cancelado ${appointmentId}. Se mantiene cancelado para revision manual.`,
+        );
+        return false;
+      }
+
+      switch (paymentInfo.status) {
+        case 'approved':
+          appointment.status = AppointmentStatus.CONFIRMED;
+          appointment.paymentStatus = PaymentStatus.PAID;
+          appointment.paymentMethod = PaymentMethod.MP;
+          appointment.paymentId = paymentId.toString();
+          appointment.depositPaid = Number(paymentInfo.transaction_amount ?? 0);
+          this.logger.log(`Pago aprobado para turno ${appointmentId}`);
+          break;
+
+        case 'pending':
+        case 'in_process':
+          appointment.paymentStatus = PaymentStatus.PENDING;
+          this.logger.log(`Pago pendiente para turno ${appointmentId}`);
+          break;
+
+        case 'rejected':
+        case 'cancelled':
+          appointment.paymentStatus = PaymentStatus.PENDING;
+          this.logger.log(`Pago rechazado para turno ${appointmentId}`);
+          break;
+
+        case 'refunded':
+          appointment.paymentStatus = PaymentStatus.REFUNDED;
+          this.logger.log(`Pago reembolsado para turno ${appointmentId}`);
+          break;
+
+        default:
+          this.logger.warn(
+            `Estado de pago no manejado para turno ${appointmentId}: ${paymentInfo.status}`,
+          );
+          return false;
+      }
+
+      await queryRunner.manager.getRepository(Appointment).save(appointment);
+      await queryRunner.commitTransaction();
+
+      const transitionedToConfirmed = this.didTransitionToConfirmed(
+        previousStatus,
+        appointment.status,
+      );
+      this.logger.log(
+        `[WA-DIAG][payments.sync] source=${source} appointmentId=${appointmentId} previousStatus=${previousStatus} nextStatus=${appointment.status} transitionedToConfirmed=${transitionedToConfirmed}`,
+      );
+
+      if (transitionedToConfirmed) {
+        try {
+          this.logger.log(
+            `[WA-DIAG][payments.sync] attempting sendAppointmentCreated appointmentId=${appointmentId} patientPhone="${appointment.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,
+          );
+          await this.whatsappService.sendAppointmentCreated({
+            appointmentId,
+            patientName: appointment.patientName,
+            patientPhone: appointment.patientPhone,
+            serviceName: appointment.service?.name ?? 'Turno',
+            date: this.formatAppointmentDate(appointment.appointmentDate),
+            time: appointment.appointmentTime,
+          });
+        } catch (error) {
+          this.logger.error(
+            `Error enviando WhatsApp de confirmacion para turno ${appointmentId}`,
+            error,
+          );
+        }
+      } else {
+        this.logger.log(
+          `[WA-DIAG][payments.sync] skipping sendAppointmentCreated appointmentId=${appointmentId} because transition condition is false`,
+        );
+      }
+
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Error sincronizando pago ${paymentId} para turno ${appointmentId}. Origen: ${source}.`,
+        error as Error,
+      );
+      return false;
+    } finally {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
+      await queryRunner.release();
+    }
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async reconcilePendingPaymentsCron(): Promise<void> {
+    try {
+      this.logger.log('[WA-DIAG][payments.reconcile.cron] tick');
+      await this.reconcilePendingApprovedPayments();
+    } catch (error) {
+      this.logger.error('Error en reconciliacion de pagos pendientes', error);
+    }
+  }
+
+  private async reconcilePendingApprovedPayments(): Promise<number> {
+    if (!this.getAccessToken()) {
+      return 0;
+    }
+
+    const pendingAppointments = await this.appointmentsRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.status = :status', {
+        status: AppointmentStatus.PENDING,
+      })
+      .andWhere('appointment.paymentStatus = :paymentStatus', {
+        paymentStatus: PaymentStatus.PENDING,
+      })
+      .orderBy('appointment.createdAt', 'DESC')
+      .take(20)
+      .getMany();
+    this.logger.log(
+      `[WA-DIAG][payments.reconcile] pendingAppointments=${pendingAppointments.length}`,
+    );
+
+    if (pendingAppointments.length === 0) {
+      return 0;
+    }
+
+    let syncedCount = 0;
+
+    for (const appointment of pendingAppointments) {
+      const paymentInfo = await this.getLatestPaymentByExternalReference(
+        appointment.id,
+      );
+
+      if (!paymentInfo) {
+        continue;
+      }
+
+      const paymentId = this.parsePaymentId(paymentInfo.id);
+      if (!paymentId) {
+        continue;
+      }
+
+      const updated = await this.syncAppointmentWithPaymentInfo(
+        paymentId,
+        paymentInfo,
+        'reconcile',
+      );
+
+      if (updated) {
+        syncedCount += 1;
+      }
+    }
+
+    if (syncedCount > 0) {
+      this.logger.log(
+        `Reconciliacion de pagos completada. Turnos sincronizados: ${syncedCount}`,
+      );
+    }
+
+    return syncedCount;
+  }
+
+  async processWebhook(
+    body?: unknown,
+    query?: Record<string, unknown>,
+  ): Promise<void> {
+    const { type, paymentId, payload } = this.resolveWebhookPaymentData(
+      body,
+      query,
+    );
+    this.logger.log(
+      `[WA-DIAG][payments.webhook] resolvedType=${type ?? 'n/a'} paymentId=${paymentId ?? 'n/a'} payload=${JSON.stringify(payload)}`,
+    );
+    this.logger.log(`Webhook recibido: ${JSON.stringify(payload)}`);
+
+    if (type && type !== 'payment') {
+      this.logger.log(
+        `[WA-DIAG][payments.webhook] ignoredType=${type ?? 'unknown'} paymentId=${paymentId ?? 'n/a'}`,
+      );
+      this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
+      return;
+    }
+
+    if (!paymentId) {
+      this.logger.warn(
+        `[WA-DIAG][payments.webhook] missingPaymentId payload=${JSON.stringify(payload)}`,
+      );
+      throw new BadRequestException('Webhook de pago sin id valido');
+    }
+
+    const paymentInfo = await this.getPaymentInfo(paymentId);
+    this.logger.log(
+      `[WA-DIAG][payments.webhook] paymentId=${paymentId} paymentStatusFromMP=${String(paymentInfo?.status ?? '')} externalReference=${String(paymentInfo?.external_reference ?? '')}`,
+    );
+
+    if (!paymentInfo) {
+      throw new BadRequestException(
+        `No se pudo obtener info del pago ${paymentId}`,
+      );
+    }
+
+    await this.syncAppointmentWithPaymentInfo(paymentId, paymentInfo, 'webhook');
+  }
+
   private async getPaymentInfo(paymentId: number): Promise<any> {
     try {
       const response = await fetch(
         `https://api.mercadopago.com/v1/payments/${paymentId}`,
         {
           headers: {
-            Authorization: `Bearer ${this.configService.get('MERCADOPAGO_ACCESS_TOKEN')}`,
+            Authorization: `Bearer ${this.getAccessToken()}`,
           },
         },
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorBody = await response.text();
+        throw new Error(
+          `HTTP ${response.status} al consultar pago ${paymentId}: ${errorBody}`,
+        );
       }
 
       return await response.json();
     } catch (error) {
-      this.logger.error('Error obteniendo info de pago:', error);
+      this.logger.error('Error obteniendo info de pago', error);
       return null;
     }
   }
 
-  /**
-   * Procesar reembolso
-   */
+  private async getLatestPaymentByExternalReference(
+    appointmentId: string,
+  ): Promise<any | null> {
+    try {
+      const response = await fetch(
+        `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(appointmentId)}&sort=date_created&criteria=desc&limit=1`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.getAccessToken()}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          `HTTP ${response.status} al buscar pago por referencia ${appointmentId}: ${errorBody}`,
+        );
+      }
+
+      const payload = await response.json();
+      const firstResult = Array.isArray(payload?.results)
+        ? payload.results[0]
+        : null;
+
+      return firstResult ?? null;
+    } catch (error) {
+      this.logger.error(
+        `Error buscando pago por external_reference ${appointmentId}`,
+        error,
+      );
+      return null;
+    }
+  }
+
   async refundPayment(appointmentId: string, reason?: string): Promise<void> {
     const appointment = await this.appointmentsService.findOne(appointmentId);
 
@@ -241,7 +815,7 @@ export class PaymentsService {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.configService.get('MERCADOPAGO_ACCESS_TOKEN')}`,
+            Authorization: `Bearer ${this.getAccessToken()}`,
           },
           body: JSON.stringify({
             amount: appointment.depositPaid,
@@ -251,16 +825,20 @@ export class PaymentsService {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorBody = await response.text();
+        throw new Error(
+          `HTTP ${response.status} al reembolsar pago ${appointment.paymentId}: ${errorBody}`,
+        );
       }
 
       appointment.paymentStatus = PaymentStatus.REFUNDED;
       await this.appointmentsRepository.save(appointment);
 
-      this.logger.log(`💸 Reembolso procesado para turno ${appointmentId}`);
+      this.logger.log(`Reembolso procesado para turno ${appointmentId}`);
     } catch (error) {
-      this.logger.error('❌ Error procesando reembolso:', error);
+      this.logger.error('Error procesando reembolso', error);
       throw new BadRequestException('Error al procesar reembolso');
     }
   }
 }
+

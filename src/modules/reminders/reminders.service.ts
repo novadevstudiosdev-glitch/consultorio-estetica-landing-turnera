@@ -1,13 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository } from 'typeorm';
 import {
   Appointment,
   AppointmentStatus,
 } from '../appointments/entities/appointment.entity';
 // import { NotificationsModule } from '../notifications/notifications.module';
 import { EmailService } from '@/common/services/email.service';
+import { WhatsappService } from '@/common/services/whatsapp.service';
 
 @Injectable()
 export class RemindersService {
@@ -17,6 +18,7 @@ export class RemindersService {
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
     private emailService: EmailService,
+    private whatsappService: WhatsappService,
   ) {}
 
   /**
@@ -51,16 +53,40 @@ export class RemindersService {
 
       for (const appointment of appointments) {
         try {
-          // Enviar email
-          await this.emailService.sendAppointmentReminder(
-            appointment.patientEmail,
-            {
-              patientName: appointment.patientName,
-              serviceName: appointment.service.name,
-              date: appointment.appointmentDate.toString(),
-              time: appointment.appointmentTime,
-            },
-          );
+          let emailSent = false;
+          try {
+            await this.emailService.sendAppointmentReminder(
+              appointment.patientEmail,
+              {
+                patientName: appointment.patientName,
+                serviceName: appointment.service.name,
+                date: appointment.appointmentDate.toString(),
+                time: appointment.appointmentTime,
+              },
+            );
+            emailSent = true;
+          } catch (error) {
+            this.logger.error(
+              `❌ Error enviando email recordatorio 24h a ${appointment.patientEmail}:`,
+              error,
+            );
+          }
+
+          const whatsappSent = await this.whatsappService.send24HourReminder({
+            appointmentId: appointment.id,
+            patientName: appointment.patientName,
+            patientPhone: appointment.patientPhone,
+            serviceName: appointment.service.name,
+            date: this.formatAppointmentDate(appointment.appointmentDate),
+            time: appointment.appointmentTime,
+          });
+
+          if (!emailSent && !whatsappSent) {
+            this.logger.warn(
+              `⚠️ No se pudo enviar recordatorio 24h por ningún canal para ${appointment.id}`,
+            );
+            continue;
+          }
 
           // Marcar como enviado
           appointment.reminder24hSent = true;
@@ -130,16 +156,40 @@ export class RemindersService {
           appointmentDateTime <= in2HoursPlus30
         ) {
           try {
-            // Enviar email
-            await this.emailService.sendAppointmentReminder(
-              appointment.patientEmail,
-              {
-                patientName: appointment.patientName,
-                serviceName: appointment.service.name,
-                date: appointment.appointmentDate.toString(),
-                time: appointment.appointmentTime,
-              },
-            );
+            let emailSent = false;
+            try {
+              await this.emailService.sendAppointmentReminder(
+                appointment.patientEmail,
+                {
+                  patientName: appointment.patientName,
+                  serviceName: appointment.service.name,
+                  date: appointment.appointmentDate.toString(),
+                  time: appointment.appointmentTime,
+                },
+              );
+              emailSent = true;
+            } catch (error) {
+              this.logger.error(
+                `❌ Error enviando email recordatorio 2h a ${appointment.patientEmail}:`,
+                error,
+              );
+            }
+
+            const whatsappSent = await this.whatsappService.send2HourReminder({
+              appointmentId: appointment.id,
+              patientName: appointment.patientName,
+              patientPhone: appointment.patientPhone,
+              serviceName: appointment.service.name,
+              date: this.formatAppointmentDate(appointment.appointmentDate),
+              time: appointment.appointmentTime,
+            });
+
+            if (!emailSent && !whatsappSent) {
+              this.logger.warn(
+                `⚠️ No se pudo enviar recordatorio 2h por ningún canal para ${appointment.id}`,
+              );
+              continue;
+            }
 
             // Marcar como enviado
             appointment.reminder2hSent = true;
@@ -161,6 +211,15 @@ export class RemindersService {
     } catch (error) {
       this.logger.error('❌ Error en cron de recordatorios 2h:', error);
     }
+  }
+
+  private formatAppointmentDate(date: string | Date): string {
+    if (date instanceof Date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    const raw = String(date ?? '').trim();
+    return raw.length > 0 ? raw : 'Sin fecha';
   }
 
   /**
