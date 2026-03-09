@@ -46,9 +46,9 @@ export class GiftCardPdfService {
 
       // Código de Gift Card (grande, centrado arriba)
       page.drawText(data.code, {
-        x: this.centerText(data.code, width, 28, font),
-        y: height - 140, // Ajustar según template
-        size: 28,
+        x: this.centerText(data.code, width, 20, font),
+        y: height - 180, // Ajustar según template
+        size: 20,
         font: font,
         color: pinkColor,
       });
@@ -56,30 +56,30 @@ export class GiftCardPdfService {
       // Monto (muy grande, destacado)
       const amountText = `$${data.amount.toLocaleString('es-AR')}`;
       page.drawText(amountText, {
-        x: this.centerText(amountText, width, 35, font),
-        y: height - 190,
-        size: 35,
+        x: this.centerText(amountText, width, 25, font),
+        y: height - 200,
+        size: 25,
         font: font,
         color: pinkColor,
       });
 
-      // Para (beneficiario)
-      page.drawText(`Para: ${data.recipientName}`, {
-        x: 80,
-        y: height - 220,
-        size: 14,
-        font: font,
-        color: blackColor,
-      });
+      // // Para (beneficiario)
+      // page.drawText(`Para: ${data.recipientName}`, {
+      //   x: 80,
+      //   y: height - 220,
+      //   size: 14,
+      //   font: font,
+      //   color: blackColor,
+      // });
 
-      // De (comprador)
-      page.drawText(`De: ${data.purchaserName}`, {
-        x: 80,
-        y: height - 240,
-        size: 14,
-        font: font,
-        color: blackColor,
-      });
+      // // De (comprador)
+      // page.drawText(`De: ${data.purchaserName}`, {
+      //   x: 80,
+      //   y: height - 240,
+      //   size: 14,
+      //   font: font,
+      //   color: blackColor,
+      // });
 
       // Válida hasta
       const expirationFormatted = new Date(
@@ -87,7 +87,7 @@ export class GiftCardPdfService {
       ).toLocaleDateString('es-AR');
       page.drawText(`Válida hasta: ${expirationFormatted}`, {
         x: 80,
-        y: height - 260,
+        y: height - 240,
         size: 12,
         font: font,
         color: grayColor,
