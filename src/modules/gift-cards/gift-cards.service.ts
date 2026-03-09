@@ -85,69 +85,85 @@ export class GiftCardsService {
     }
 
     if (paymentStatus === 'approved') {
-      // Mercado Pago puede reenviar notificaciones del mismo pago.
-      // Evitar reprocesar y reenviar el email.
-      if (
-        giftCard.status === GiftCardStatus.ACTIVE &&
-        giftCard.paymentStatus === 'approved'
-      ) {
+      const now = new Date();
+      const expirationDate = this.calculateExpirationDate(now);
+
+      // Idempotencia a nivel DB para evitar dobles envios con webhooks concurrentes.
+      const activationResult = await this.giftCardsRepository
+        .createQueryBuilder()
+        .update(GiftCard)
+        .set({
+          status: GiftCardStatus.ACTIVE,
+          paymentId,
+          paymentStatus: paymentStatus,
+          purchaseDate: now,
+          expirationDate,
+        })
+        .where('id = :id', { id: giftCardId })
+        .andWhere(
+          '(status != :activeStatus OR payment_status != :approvedStatus)',
+          {
+            activeStatus: GiftCardStatus.ACTIVE,
+            approvedStatus: 'approved',
+          },
+        )
+        .execute();
+
+      if ((activationResult.affected ?? 0) === 0) {
         this.logger.log(
           `Webhook duplicado ignorado para gift card ${giftCard.code} (paymentId: ${paymentId})`,
         );
         return giftCard;
       }
 
-      const shouldSendEmail = giftCard.status !== GiftCardStatus.ACTIVE;
-      const now = new Date();
+      const activated = await this.giftCardsRepository.findOne({
+        where: { id: giftCardId },
+      });
 
-      giftCard.status = GiftCardStatus.ACTIVE;
-      giftCard.paymentId = paymentId;
-      giftCard.paymentStatus = paymentStatus;
-      giftCard.purchaseDate = now;
-      giftCard.expirationDate = this.calculateExpirationDate(now);
-
-      const activated = await this.giftCardsRepository.save(giftCard);
-
-      if (shouldSendEmail) {
-        try {
-          await this.emailService.sendGiftCardEmail(giftCard.recipientEmail, {
-            recipientName: giftCard.recipientName,
-            code: giftCard.code,
-            amount: giftCard.amount,
-            expirationDate: giftCard
-              .expirationDate!.toISOString()
-              .split('T')[0],
-            purchaserName: giftCard.purchaserName,
-            personalMessage: giftCard.personalMessage,
-          });
-
-          this.logger.log(`Gift Card enviada a ${giftCard.recipientEmail}`);
-
-          if (
-            giftCard.purchaserEmail &&
-            giftCard.purchaserEmail !== giftCard.recipientEmail
-          ) {
-            await this.emailService.sendGiftCardPurchaseConfirmation(
-              giftCard.purchaserEmail,
-              {
-                purchaserName: giftCard.purchaserName,
-                recipientName: giftCard.recipientName,
-                code: giftCard.code,
-                amount: Number(giftCard.amount),
-                expirationDate: giftCard.expirationDate!.toISOString().split('T')[0],
-              },
-            );
-
-            this.logger.log(
-              `Confirmacion de compra enviada a ${giftCard.purchaserEmail}`,
-            );
-          }
-        } catch (error) {
-          this.logger.error('Error enviando email de gift card:', error);
-        }
+      if (!activated) {
+        throw new NotFoundException('Gift Card no encontrada tras activacion');
       }
 
-      this.logger.log(`Gift Card activada: ${giftCard.code}`);
+      try {
+        await this.emailService.sendGiftCardEmail(activated.recipientEmail, {
+          recipientName: activated.recipientName,
+          code: activated.code,
+          amount: activated.amount,
+          expirationDate: activated.expirationDate!.toISOString().split('T')[0],
+          purchaserName: activated.purchaserName,
+          personalMessage: activated.personalMessage,
+        });
+
+        this.logger.log(`Gift Card enviada a ${activated.recipientEmail}`);
+
+        const purchaserEmail = activated.purchaserEmail?.trim().toLowerCase();
+        const recipientEmail = activated.recipientEmail?.trim().toLowerCase();
+
+        if (purchaserEmail && purchaserEmail !== recipientEmail) {
+          await this.emailService.sendGiftCardPurchaseConfirmation(
+            activated.purchaserEmail,
+            {
+              purchaserName: activated.purchaserName,
+              recipientName: activated.recipientName,
+              code: activated.code,
+              amount: Number(activated.amount),
+              expirationDate: activated.expirationDate!.toISOString().split('T')[0],
+            },
+          );
+
+          this.logger.log(
+            `Confirmacion de compra enviada a ${activated.purchaserEmail}`,
+          );
+        } else {
+          this.logger.log(
+            `Se omite email de compra: purchaserEmail y recipientEmail son iguales (${activated.recipientEmail})`,
+          );
+        }
+      } catch (error) {
+        this.logger.error('Error enviando email de gift card:', error);
+      }
+
+      this.logger.log(`Gift Card activada: ${activated.code}`);
       return activated;
     }
 

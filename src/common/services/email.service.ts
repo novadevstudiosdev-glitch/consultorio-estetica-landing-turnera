@@ -790,19 +790,21 @@ export class EmailService {
     purchaserName: string;
     personalMessage?: string;
   }): string {
+    const whatsappUrl = `https://wa.me/5493417511529?text=Hola!%20Tengo%20una%20Gift%20Card%20con%20codigo%20${data.code}`;
+
     return this.getBaseEmailTemplate({
-      preheader: 'Se registro una gift card a tu nombre.',
-      title: 'Gift Card registrada',
+      preheader: `${data.purchaserName} te regalo $${data.amount.toLocaleString('es-AR')} en tratamientos.`,
+      title: 'Recibiste una Gift Card',
       greetingName: data.recipientName,
       variant: 'gift',
       introHtml: `
-        <p><strong>${data.purchaserName}</strong> realizo una compra y esta gift card quedo asignada a tu nombre.</p>
+        <p><strong>${data.purchaserName}</strong> te ha regalado una Gift Card para que disfrutes de nuestros tratamientos de medicina estetica.</p>
         ${
           data.personalMessage
             ? `
         <div class="infoBox">
-          <p style="margin:0; color:#7A7A7A;">
-            <strong>Mensaje:</strong><br>
+          <p style="margin:0; font-style:italic; color:#7A7A7A;">
+            <strong>Mensaje de ${data.purchaserName}:</strong><br>
             "${data.personalMessage}"
           </p>
         </div>
@@ -811,19 +813,38 @@ export class EmailService {
         }
       `,
       bodyHtml: `
-        <div class="infoBox">
-          <p class="infoRow"><strong>Codigo:</strong> ${data.code}</p>
-          <p class="infoRow"><strong>Monto:</strong> $${data.amount.toLocaleString('es-AR')}</p>
-          <p class="infoRow"><strong>Vigencia:</strong> hasta ${new Date(data.expirationDate).toLocaleDateString('es-AR')}</p>
-          <p class="infoRow" style="margin:0;"><strong>Comprador:</strong> ${data.purchaserName}</p>
+        <div class="infoBox" style="text-align:center; padding:24px; background: linear-gradient(135deg, #FCE4EC 0%, #FFFFFF 100%);">
+          <p style="margin:0 0 8px 0; font-size:12px; color:#7A7A7A; text-transform:uppercase; letter-spacing:1px;">Codigo de Gift Card</p>
+          <p style="margin:0 0 16px 0; font-size:28px; font-weight:bold; color:#E91E63; font-family:'Courier New',monospace; letter-spacing:2px;">${data.code}</p>
+          <p style="margin:0; font-size:32px; font-weight:bold; color:#E91E63;">$${data.amount.toLocaleString('es-AR')}</p>
         </div>
 
         <div class="infoBox">
-          <p class="infoRow"><strong>Como usarla:</strong> al reservar, informa el codigo de la gift card para aplicar saldo.</p>
-          <p class="infoRow" style="margin:0;"><strong>Condiciones:</strong> no reembolsable, no canjeable por efectivo y sujeta a disponibilidad.</p>
+          <p style="margin:0 0 12px 0; font-weight:bold; color:#E91E63;">Como usar tu Gift Card</p>
+          <p class="infoRow">1. <strong>Agenda tu turno:</strong> escribinos por WhatsApp mencionando que tenes una Gift Card</p>
+          <p class="infoRow">2. <strong>Presenta tu codigo:</strong> comparti el codigo <strong>${data.code}</strong> cuando agendes</p>
+          <p class="infoRow" style="margin:0;">3. <strong>Disfruta:</strong> elegi el tratamiento que mas te guste</p>
+        </div>
+
+        <div class="infoBox">
+          <p style="margin:0 0 8px 0; font-weight:bold;">Condiciones</p>
+          <p class="infoRow" style="font-size:13px;">Valida por 90 dias (hasta el <strong>${new Date(data.expirationDate).toLocaleDateString('es-AR')}</strong>)</p>
+          <p class="infoRow" style="font-size:13px;">Puede usarse en uno o mas tratamientos hasta agotar el saldo</p>
+          <p class="infoRow" style="font-size:13px;">Tratamientos personalizados segun necesidad</p>
+          <p class="infoRow" style="font-size:13px;">No reembolsable ni canjeable por efectivo</p>
+          <p class="infoRow" style="font-size:13px; margin:0;">Turnos sujetos a disponibilidad</p>
         </div>
       `,
-      footerLines: ['Consultorio Dra. Jaquelina Grassetti'],
+      cta: {
+        label: 'Agendar por WhatsApp',
+        url: whatsappUrl,
+      },
+      footerLines: [
+        'Dra. Jaquelina Grassetti - Medicina Estetica',
+        'Junin 191, Piso VIII, Consultorio I, Rosario - Sta. Fe',
+        '+54 9 341 7511529',
+        'Instagram: @dra.jaquelinagrassetti',
+      ],
     });
   }
 
