@@ -13,6 +13,7 @@ import {
   UpdateGiftCardDto,
 } from './dto/gift-card.dto';
 import { EmailService } from '../../common/services/email.service';
+import { GiftCardPdfService } from './gift-card-pdf.service';
 
 @Injectable()
 export class GiftCardsService {
@@ -22,6 +23,7 @@ export class GiftCardsService {
     @InjectRepository(GiftCard)
     private giftCardsRepository: Repository<GiftCard>,
     private emailService: EmailService,
+    private giftCardPdfService: GiftCardPdfService,
   ) {}
 
   /**
@@ -141,15 +143,37 @@ export class GiftCardsService {
         throw new NotFoundException('Gift Card no encontrada tras activacion');
       }
 
+      // Generar PDF
+      let pdfBuffer: Buffer | undefined;
       try {
-        await this.emailService.sendGiftCardEmail(activated.recipientEmail, {
-          recipientName: activated.recipientName,
+        pdfBuffer = await this.giftCardPdfService.generateGiftCardPDF({
           code: activated.code,
           amount: activated.amount,
-          expirationDate: this.formatDateForEmail(activated.expirationDate),
+          recipientName: activated.recipientName,
           purchaserName: activated.purchaserName,
+          expirationDate: this.formatDateForEmail(activated.expirationDate),
           personalMessage: activated.personalMessage,
         });
+
+        this.logger.log(`📄 PDF generado para gift card ${activated.code}`);
+      } catch (error) {
+        this.logger.error('Error generando PDF de gift card:', error);
+        // Continúa sin PDF si falla
+      }
+
+      try {
+        await this.emailService.sendGiftCardEmail(
+          activated.recipientEmail,
+          {
+            recipientName: activated.recipientName,
+            code: activated.code,
+            amount: activated.amount,
+            expirationDate: this.formatDateForEmail(activated.expirationDate),
+            purchaserName: activated.purchaserName,
+            personalMessage: activated.personalMessage,
+          },
+          pdfBuffer, // PASAR PDF
+        );
 
         this.logger.log(`Gift Card enviada a ${activated.recipientEmail}`);
 
@@ -187,6 +211,7 @@ export class GiftCardsService {
     giftCard.paymentStatus = paymentStatus;
     return await this.giftCardsRepository.save(giftCard);
   }
+
   /**
    * Listar gift cards (admin)
    */

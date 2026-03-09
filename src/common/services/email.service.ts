@@ -287,7 +287,7 @@ export class EmailService {
   }
 
   /**
-   * Enviar gift card por email
+   * Enviar gift card por email CON PDF ADJUNTO
    */
   async sendGiftCardEmail(
     to: string,
@@ -299,6 +299,7 @@ export class EmailService {
       purchaserName: string;
       personalMessage?: string;
     },
+    pdfBuffer?: Buffer, // AGREGAR PARÁMETRO OPCIONAL
   ): Promise<void> {
     if (!this.resend) {
       this.logger.warn(`📧 [SIMULATED] Gift card email to ${to}`);
@@ -309,17 +310,30 @@ export class EmailService {
     const html = this.getGiftCardEmailTemplate(data);
 
     try {
-      const { data: emailData, error } = await this.resend.emails.send({
+      const emailData: any = {
         from: `${this.fromName} <${this.fromEmail}>`,
         to,
         subject: 'Gift Card confirmada - Consultorio Dra. Jaquelina Grassetti',
         html,
-      });
+      };
+
+      // Si hay PDF, adjuntarlo
+      if (pdfBuffer) {
+        emailData.attachments = [
+          {
+            filename: `GiftCard-${data.code}.pdf`,
+            content: pdfBuffer,
+          },
+        ];
+      }
+
+      const { data: emailResponse, error } =
+        await this.resend.emails.send(emailData);
 
       if (error) throw error;
 
       this.logger.log(
-        `📧 Gift Card email sent to ${to} (Code: ${data.code}, ID: ${emailData?.id})`,
+        `📧 Gift Card email sent to ${to} (Code: ${data.code}, ID: ${emailResponse?.id})`,
       );
     } catch (error) {
       this.logger.error(`❌ Error sending gift card email to ${to}:`, error);
@@ -338,7 +352,9 @@ export class EmailService {
     },
   ): Promise<void> {
     if (!this.resend) {
-      this.logger.warn(`📧 [SIMULATED] Gift card purchase confirmation to ${to}`);
+      this.logger.warn(
+        `📧 [SIMULATED] Gift card purchase confirmation to ${to}`,
+      );
       this.logger.warn(`Code: ${data.code}, Amount: $${data.amount}`);
       return;
     }
@@ -349,7 +365,8 @@ export class EmailService {
       const { data: emailData, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to,
-        subject: 'Compra de Gift Card confirmada - Consultorio Dra. Jaquelina Grassetti',
+        subject:
+          'Compra de Gift Card confirmada - Consultorio Dra. Jaquelina Grassetti',
         html,
       });
 
@@ -520,7 +537,7 @@ export class EmailService {
     }
 
     .infoRow { margin:0 0 8px 0; font-size:14px; }
-    .infoRow strong { display:inline-block; min-width:72px; }
+    .infoLabel { display:inline-block; min-width:72px; }
 
     .ctaWrap { text-align:center; padding:10px 26px 22px 26px; }
 
@@ -864,10 +881,10 @@ export class EmailService {
         '<p class="muted">Tu pago fue aprobado y la gift card quedo activa.</p>',
       bodyHtml: `
         <div class="infoBox">
-          <p class="infoRow"><strong>Destinatario:</strong> ${data.recipientName}</p>
-          <p class="infoRow"><strong>Codigo:</strong> ${data.code}</p>
-          <p class="infoRow"><strong>Monto:</strong> $${data.amount.toLocaleString('es-AR')}</p>
-          <p class="infoRow" style="margin:0;"><strong>Vigencia:</strong> hasta ${new Date(data.expirationDate).toLocaleDateString('es-AR')}</p>
+          <p class="infoRow"><strong class="infoLabel">Destinatario:</strong> ${data.recipientName}</p>
+          <p class="infoRow"><strong class="infoLabel">Codigo:</strong> ${data.code}</p>
+          <p class="infoRow"><strong class="infoLabel">Monto:</strong> $${data.amount.toLocaleString('es-AR')}</p>
+          <p class="infoRow" style="margin:0;"><strong class="infoLabel">Vigencia:</strong> hasta ${new Date(data.expirationDate).toLocaleDateString('es-AR')}</p>
         </div>
         <p style="margin-top:14px;">Enviamos tambien la gift card al destinatario configurado.</p>
       `,
