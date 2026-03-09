@@ -61,9 +61,9 @@ export class GiftCardPdfService {
 
       const amountText = `$${data.amount.toLocaleString('es-AR')}`;
       page.drawText(amountText, {
-        x: this.centerText(amountText, width, 25, displayFont),
+        x: this.centerText(amountText, width, 20, displayFont),
         y: height - 200,
-        size: 25,
+        size: 20,
         font: displayFont,
         color: brandColor,
       });
