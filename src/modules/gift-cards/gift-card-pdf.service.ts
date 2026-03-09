@@ -47,7 +47,7 @@ export class GiftCardPdfService {
       // Código de Gift Card (grande, centrado arriba)
       page.drawText(data.code, {
         x: this.centerText(data.code, width, 28, font),
-        y: height - 160, // Ajustar según template
+        y: height - 140, // Ajustar según template
         size: 28,
         font: font,
         color: pinkColor,
@@ -66,7 +66,7 @@ export class GiftCardPdfService {
       // Para (beneficiario)
       page.drawText(`Para: ${data.recipientName}`, {
         x: 80,
-        y: height - 200,
+        y: height - 220,
         size: 14,
         font: font,
         color: blackColor,
@@ -75,7 +75,7 @@ export class GiftCardPdfService {
       // De (comprador)
       page.drawText(`De: ${data.purchaserName}`, {
         x: 80,
-        y: height - 220,
+        y: height - 240,
         size: 14,
         font: font,
         color: blackColor,
