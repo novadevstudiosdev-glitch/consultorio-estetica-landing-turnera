@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Twilio } from 'twilio';
 
+type WhatsappEvent = 'created' | 'cancelled' | 'reminder_24h' | 'reminder_2h';
+type WhatsappRecipient = 'patient' | 'doctor';
+
 interface AppointmentWhatsappPayload {
   appointmentId?: string;
   patientName: string;
@@ -26,17 +29,27 @@ interface DeliveryStatusSnapshot {
 
 interface WhatsappDispatchContext {
   appointmentId?: string;
-  event: 'created' | 'cancelled' | 'reminder_24h' | 'reminder_2h';
+  event: WhatsappEvent;
+  patientTemplateVariables?: Record<string, string>;
+  doctorTemplateVariables?: Record<string, string>;
 }
 
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
+  // Temporarily disabled: Twilio integration is not in use.
+  // Do not remove yet, pending migration to WhatsApp Cloud API.
+  private readonly twilioTemporarilyDisabled = true;
   private readonly whatsappEnabled: boolean;
+  private readonly useContentTemplates: boolean;
   private readonly fromNumber?: string;
   private readonly doctorPhone?: string;
   private readonly deliveryCheckTimeoutMs: number;
   private readonly deliveryCheckIntervalMs: number;
+  private readonly templateSidByEventRecipient: Record<
+    WhatsappEvent,
+    Partial<Record<WhatsappRecipient, string>>
+  >;
   private twilioClient: Twilio | null = null;
 
   constructor(private readonly configService: ConfigService) {
@@ -50,6 +63,10 @@ export class WhatsappService {
     );
 
     this.whatsappEnabled = whatsappEnabled && notificationsWhatsappEnabled;
+    this.useContentTemplates = this.parseBoolean(
+      this.configService.get<string>('WHATSAPP_USE_CONTENT_TEMPLATES'),
+      false,
+    );
     this.fromNumber = this.normalizeWhatsappAddress(
       this.configService.get<string>('TWILIO_WHATSAPP_FROM'),
     );
@@ -64,9 +81,62 @@ export class WhatsappService {
       this.configService.get<string>('WHATSAPP_DELIVERY_CHECK_INTERVAL_MS'),
       750,
     );
+    this.templateSidByEventRecipient = {
+      created: {
+        patient: this.normalizeEnvValue(
+          this.configService.get<string>(
+            'TWILIO_CONTENT_SID_CREATED_PATIENT',
+          ),
+        ),
+        doctor: this.normalizeEnvValue(
+          this.configService.get<string>('TWILIO_CONTENT_SID_CREATED_DOCTOR'),
+        ),
+      },
+      cancelled: {
+        patient: this.normalizeEnvValue(
+          this.configService.get<string>(
+            'TWILIO_CONTENT_SID_CANCELLED_PATIENT',
+          ),
+        ),
+        doctor: this.normalizeEnvValue(
+          this.configService.get<string>('TWILIO_CONTENT_SID_CANCELLED_DOCTOR'),
+        ),
+      },
+      reminder_24h: {
+        patient: this.normalizeEnvValue(
+          this.configService.get<string>(
+            'TWILIO_CONTENT_SID_REMINDER_24H_PATIENT',
+          ),
+        ),
+        doctor: this.normalizeEnvValue(
+          this.configService.get<string>(
+            'TWILIO_CONTENT_SID_REMINDER_24H_DOCTOR',
+          ),
+        ),
+      },
+      reminder_2h: {
+        patient: this.normalizeEnvValue(
+          this.configService.get<string>(
+            'TWILIO_CONTENT_SID_REMINDER_2H_PATIENT',
+          ),
+        ),
+        doctor: this.normalizeEnvValue(
+          this.configService.get<string>(
+            'TWILIO_CONTENT_SID_REMINDER_2H_DOCTOR',
+          ),
+        ),
+      },
+    };
     this.logger.log(
-      `[WA-DIAG][whatsapp.constructor] enabledFlags={WHATSAPP_ENABLED:${whatsappEnabled},NOTIFICATIONS_WHATSAPP_ENABLED:${notificationsWhatsappEnabled}} effectiveEnabled=${this.whatsappEnabled} hasFrom=${Boolean(this.fromNumber)} hasDoctorFallback=${Boolean(this.doctorPhone)} deliveryCheckTimeoutMs=${this.deliveryCheckTimeoutMs} deliveryCheckIntervalMs=${this.deliveryCheckIntervalMs}`,
+      `[WA-DIAG][whatsapp.constructor] enabledFlags={WHATSAPP_ENABLED:${whatsappEnabled},NOTIFICATIONS_WHATSAPP_ENABLED:${notificationsWhatsappEnabled}} effectiveEnabled=${this.whatsappEnabled} useContentTemplates=${this.useContentTemplates} hasFrom=${Boolean(this.fromNumber)} hasDoctorFallback=${Boolean(this.doctorPhone)} deliveryCheckTimeoutMs=${this.deliveryCheckTimeoutMs} deliveryCheckIntervalMs=${this.deliveryCheckIntervalMs}`,
     );
+
+    if (this.twilioTemporarilyDisabled) {
+      this.logger.warn(
+        'Temporarily disabled: Twilio integration is not in use. Do not remove yet, pending migration to WhatsApp Cloud API.',
+      );
+      return;
+    }
 
     if (!this.whatsappEnabled) {
       this.logger.warn(
@@ -120,6 +190,7 @@ export class WhatsappService {
       `\nServicio: ${payload.serviceName}` +
       `\nFecha: ${payload.date}` +
       `\nHora: ${payload.time}`;
+    const templateVariables = this.buildTemplateVariables(payload);
 
     return this.sendToPatientAndDoctor(
       payload.patientPhone,
@@ -129,6 +200,8 @@ export class WhatsappService {
       {
         appointmentId: payload.appointmentId,
         event: 'created',
+        patientTemplateVariables: templateVariables,
+        doctorTemplateVariables: templateVariables,
       },
     );
   }
@@ -157,6 +230,7 @@ export class WhatsappService {
       `\nFecha: ${payload.date}` +
       `\nHora: ${payload.time}` +
       reasonText;
+    const templateVariables = this.buildTemplateVariables(payload, true);
 
     return this.sendToPatientAndDoctor(
       payload.patientPhone,
@@ -166,6 +240,8 @@ export class WhatsappService {
       {
         appointmentId: payload.appointmentId,
         event: 'cancelled',
+        patientTemplateVariables: templateVariables,
+        doctorTemplateVariables: templateVariables,
       },
     );
   }
@@ -188,6 +264,7 @@ export class WhatsappService {
       `\nServicio: ${payload.serviceName}` +
       `\nFecha: ${payload.date}` +
       `\nHora: ${payload.time}`;
+    const templateVariables = this.buildTemplateVariables(payload);
 
     return this.sendToPatientAndDoctor(
       payload.patientPhone,
@@ -197,6 +274,8 @@ export class WhatsappService {
       {
         appointmentId: payload.appointmentId,
         event: 'reminder_24h',
+        patientTemplateVariables: templateVariables,
+        doctorTemplateVariables: templateVariables,
       },
     );
   }
@@ -219,6 +298,7 @@ export class WhatsappService {
       `\nServicio: ${payload.serviceName}` +
       `\nFecha: ${payload.date}` +
       `\nHora: ${payload.time}`;
+    const templateVariables = this.buildTemplateVariables(payload);
 
     return this.sendToPatientAndDoctor(
       payload.patientPhone,
@@ -228,6 +308,8 @@ export class WhatsappService {
       {
         appointmentId: payload.appointmentId,
         event: 'reminder_2h',
+        patientTemplateVariables: templateVariables,
+        doctorTemplateVariables: templateVariables,
       },
     );
   }
@@ -239,6 +321,13 @@ export class WhatsappService {
     doctorMessage: string,
     context: WhatsappDispatchContext,
   ): Promise<boolean> {
+    if (this.twilioTemporarilyDisabled) {
+      this.logger.warn(
+        `[WA-DIAG][whatsapp.dispatch] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} skipped=twilio_temporarily_disabled message="Twilio disabled temporarily"`,
+      );
+      return false;
+    }
+
     this.logger.log(
       `[WA-DIAG][whatsapp.dispatch] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} patientPhoneRaw="${patientPhone ?? ''}" doctorPhoneRaw="${doctorPhone ?? this.doctorPhone ?? ''}"`,
     );
@@ -263,9 +352,16 @@ export class WhatsappService {
   private async sendMessage(
     rawPhone: string | undefined,
     message: string,
-    recipient: 'patient' | 'doctor',
+    recipient: WhatsappRecipient,
     context: WhatsappDispatchContext,
   ): Promise<boolean> {
+    if (this.twilioTemporarilyDisabled) {
+      this.logger.warn(
+        `[WA-DIAG][whatsapp.sendMessage] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} recipient=${recipient} skipped=twilio_temporarily_disabled message="Twilio disabled temporarily"`,
+      );
+      return false;
+    }
+
     if (!this.whatsappEnabled) {
       this.logger.warn(
         `[WA-DIAG][whatsapp.sendMessage] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} recipient=${recipient} skipped=disabled_by_config`,
@@ -304,15 +400,46 @@ export class WhatsappService {
     }
 
     try {
-      this.logger.log(
-        `[WA-DIAG][whatsapp.sendMessage] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} recipient=${recipient} attemptingSend=true from=${this.fromNumber} to=${toAddress}`,
-      );
+      const templateSid = this.getTemplateSid(context.event, recipient);
+      const templateVariables =
+        recipient === 'patient'
+          ? context.patientTemplateVariables
+          : context.doctorTemplateVariables;
+      const useTemplate = this.useContentTemplates && Boolean(templateSid);
 
-      const createdMessage = await this.twilioClient.messages.create({
-        body: message,
+      if (this.useContentTemplates && !templateSid) {
+        this.logger.warn(
+          `[WA-DIAG][whatsapp.sendMessage] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} recipient=${recipient} missingTemplateSid=true fallback=body`,
+        );
+      }
+
+      const createPayload: {
+        from: string;
+        to: string;
+        body?: string;
+        contentSid?: string;
+        contentVariables?: string;
+      } = {
         from: this.fromNumber,
         to: toAddress,
-      });
+      };
+
+      if (useTemplate) {
+        createPayload.contentSid = templateSid;
+        if (templateVariables && Object.keys(templateVariables).length > 0) {
+          createPayload.contentVariables = JSON.stringify(templateVariables);
+        }
+      } else {
+        createPayload.body = message;
+      }
+
+      this.logger.log(
+        `[WA-DIAG][whatsapp.sendMessage] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} recipient=${recipient} attemptingSend=true mode=${useTemplate ? 'template' : 'body'} contentSid=${templateSid ?? 'n/a'} from=${this.fromNumber} to=${toAddress}`,
+      );
+
+      const createdMessage = await this.twilioClient.messages.create(
+        createPayload as any,
+      );
       this.logger.log(
         `[WA-DIAG][whatsapp.sendMessage] event=${context.event} appointmentId=${context.appointmentId ?? 'n/a'} recipient=${recipient} twilioMessageSid=${createdMessage.sid} createStatus=${String(createdMessage.status ?? 'queued')}`,
       );
@@ -431,6 +558,36 @@ export class WhatsappService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private buildTemplateVariables(
+    payload: AppointmentWhatsappPayload,
+    includeCancellationReason = false,
+  ): Record<string, string> {
+    const variables: Record<string, string> = {
+      '1': payload.patientName ?? '',
+      '2': payload.serviceName ?? '',
+      '3': payload.date ?? '',
+      '4': payload.time ?? '',
+    };
+
+    if (includeCancellationReason) {
+      variables['5'] = payload.cancellationReason?.trim() ?? '';
+    }
+
+    return variables;
+  }
+
+  private getTemplateSid(
+    event: WhatsappEvent,
+    recipient: WhatsappRecipient,
+  ): string | undefined {
+    return this.templateSidByEventRecipient[event]?.[recipient];
+  }
+
+  private normalizeEnvValue(value?: string): string | undefined {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
   }
 
   private normalizeWhatsappAddress(value?: string | null): string | undefined {
