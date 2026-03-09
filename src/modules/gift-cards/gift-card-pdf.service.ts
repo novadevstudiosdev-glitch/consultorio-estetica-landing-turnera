@@ -41,7 +41,10 @@ export class GiftCardPdfService {
       const fallbackDisplayFont = await pdfDoc.embedFont(
         StandardFonts.TimesRomanItalic,
       );
-      const displayFont = await this.getDisplayFont(pdfDoc, fallbackDisplayFont);
+      const displayFont = await this.getDisplayFont(
+        pdfDoc,
+        fallbackDisplayFont,
+      );
 
       // Color principal
       const brandColor = rgb(0.769, 0.478, 0.522); // #c47a85
@@ -50,7 +53,7 @@ export class GiftCardPdfService {
       // Posiciones (las que ajustaste)
       page.drawText(data.code, {
         x: this.centerText(data.code, width, 20, displayFont),
-        y: height - 180,
+        y: height - 160,
         size: 20,
         font: displayFont,
         color: brandColor,
@@ -83,9 +86,9 @@ export class GiftCardPdfService {
       //   color: rgb(0, 0, 0),
       // });
 
-      const expirationFormatted = new Date(data.expirationDate).toLocaleDateString(
-        'es-AR',
-      );
+      const expirationFormatted = new Date(
+        data.expirationDate,
+      ).toLocaleDateString('es-AR');
       page.drawText(`Valida hasta: ${expirationFormatted}`, {
         x: 80,
         y: height - 240,
@@ -155,11 +158,16 @@ export class GiftCardPdfService {
       color: brandColor,
     });
 
-    const expirationFormatted = new Date(data.expirationDate).toLocaleDateString(
-      'es-AR',
-    );
+    const expirationFormatted = new Date(
+      data.expirationDate,
+    ).toLocaleDateString('es-AR');
     page.drawText(`Valida hasta: ${expirationFormatted}`, {
-      x: this.centerText(`Valida hasta: ${expirationFormatted}`, width, 12, font),
+      x: this.centerText(
+        `Valida hasta: ${expirationFormatted}`,
+        width,
+        12,
+        font,
+      ),
       y: height - 410,
       size: 12,
       font,
@@ -188,7 +196,9 @@ export class GiftCardPdfService {
       pdfDoc.registerFontkit(fontkit);
       const fontBytes = await fs.readFile(this.arterioFontPath);
       const arterioFont = await pdfDoc.embedFont(fontBytes);
-      this.logger.log('Fuente PDF: ArterioNonCommercial.otf cargada correctamente.');
+      this.logger.log(
+        'Fuente PDF: ArterioNonCommercial.otf cargada correctamente.',
+      );
       return arterioFont;
     } catch (error) {
       this.logger.warn(
