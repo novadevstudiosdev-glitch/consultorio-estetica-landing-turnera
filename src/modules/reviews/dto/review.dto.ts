@@ -2,6 +2,7 @@ import {
   IsString,
   IsInt,
   IsOptional,
+  IsBoolean,
   Min,
   Max,
   MaxLength,
@@ -57,6 +58,7 @@ export class ApproveReviewDto {
     description: 'Aprobar (true) o rechazar (false)',
   })
   @Type(() => Boolean)
+  @IsBoolean({ message: 'isApproved debe ser booleano' })
   isApproved: boolean;
 }
 
@@ -98,6 +100,7 @@ export class ListReviewsQueryDto {
   })
   @IsOptional()
   @Type(() => Boolean)
+  @IsBoolean()
   isApproved?: boolean;
 
   @ApiPropertyOptional({

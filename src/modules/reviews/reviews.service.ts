@@ -34,7 +34,7 @@ export class ReviewsService {
    */
   async create(
     createReviewDto: CreateReviewDto,
-    user?: User,
+    user: User,
   ): Promise<Review> {
     // Obtener el turno
     const appointment = await this.appointmentsRepository.findOne({
@@ -53,14 +53,20 @@ export class ReviewsService {
       );
     }
 
-    // Si hay usuario autenticado, validar que sea el dueño del turno
-    if (user) {
-      const isOwner = appointment.patientEmail === user.email;
-      const isAdmin = user.role === UserRole.ADMIN;
+    // Solo pacientes autenticados pueden dejar reseñas
+    if (user.role !== UserRole.PATIENT) {
+      throw new ForbiddenException(
+        'Solo los pacientes pueden dejar reseñas',
+      );
+    }
 
-      if (!isOwner && !isAdmin) {
-        throw new ForbiddenException('No puedes dejar reseña en turnos de otros usuarios');
-      }
+    // Validar que sea dueño del turno
+    const isOwnerByUserId = !!appointment.userId && appointment.userId === user.id;
+    const isOwnerByEmail = appointment.patientEmail === user.email;
+    if (!isOwnerByUserId && !isOwnerByEmail) {
+      throw new ForbiddenException(
+        'No puedes dejar reseña en turnos de otros usuarios',
+      );
     }
 
     // Verificar que no exista ya una review para este turno
@@ -77,8 +83,8 @@ export class ReviewsService {
       appointmentId: createReviewDto.appointmentId,
       rating: createReviewDto.rating,
       comment: createReviewDto.comment,
-      userId: user?.id,
-      reviewerName: createReviewDto.reviewerName || user?.fullName || appointment.patientName,
+      userId: user.id,
+      reviewerName: createReviewDto.reviewerName || user.fullName || appointment.patientName,
       isApproved: false, // Requiere aprobación del admin
     });
 

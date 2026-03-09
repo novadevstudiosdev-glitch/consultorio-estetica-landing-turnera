@@ -37,18 +37,26 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Post()
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Crear reseña',
     description:
-      'Permite crear una reseña para un turno completado. Usuario autenticado o anónimo.',
+      'Solo pacientes autenticados con turno completado pueden crear una reseña.',
   })
   @ApiResponse({ status: 201, description: 'Reseña creada exitosamente' })
-  @ApiResponse({ status: 400, description: 'Turno no completado o ya tiene reseña' })
+  @ApiResponse({
+    status: 400,
+    description: 'Turno no completado o ya tiene reseña',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Solo pacientes dueños del turno pueden dejar reseña',
+  })
   @ApiResponse({ status: 404, description: 'Turno no encontrado' })
   async create(
     @Body() createReviewDto: CreateReviewDto,
-    @CurrentUser() user?: User,
+    @CurrentUser() user: User,
   ) {
     return await this.reviewsService.create(createReviewDto, user);
   }
