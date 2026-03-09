@@ -12,8 +12,7 @@ import {
 import * as bcrypt from 'bcryptjs';
 import { Exclude } from 'class-transformer';
 import { Appointment } from '../../appointments/entities/appointment.entity';
-// import { MedicalRnpecord } from '../../medical-records/entities/medical-record.entity';
-import { Testimonial } from '../../testimonials/entities/testimonial.entity';
+import { Review } from '../../reviews/entities/review.entity';
 import { PasswordResetToken } from './password-reset-token.entity';
 import { EmailVerificationToken } from './email-verification-token.entity';
 
@@ -117,8 +116,8 @@ export class User {
   //   @OneToMany(() => MedicalRecord, (record) => record.createdByAdmin)
   //   createdMedicalRecords: MedicalRecord[];
 
-  //   @OneToMany(() => Testimonial, (testimonial) => testimonial.user)
-  //   testimonials: Testimonial[];
+  @OneToMany(() => Review, (review) => review.user)
+  reviews: Review[];
 
   @OneToMany(() => PasswordResetToken, (token) => token.user)
   passwordResetTokens: PasswordResetToken[];
