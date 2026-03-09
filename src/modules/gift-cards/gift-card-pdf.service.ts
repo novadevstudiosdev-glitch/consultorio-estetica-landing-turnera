@@ -6,7 +6,11 @@ import { join } from 'path';
 @Injectable()
 export class GiftCardPdfService {
   private readonly logger = new Logger(GiftCardPdfService.name);
-  private readonly templatePath = join(process.cwd(), 'assets', 'gift-card-template.pdf');
+  private readonly templatePath = join(
+    process.cwd(),
+    'assets',
+    'gift-card-template.pdf',
+  );
 
   /**
    * Generar PDF de gift card desde template
@@ -42,20 +46,20 @@ export class GiftCardPdfService {
 
       // Código de Gift Card (grande, centrado arriba)
       page.drawText(data.code, {
-        x: this.centerText(data.code, width, 28, fontBold),
+        x: this.centerText(data.code, width, 28, font),
         y: height - 200, // Ajustar según template
         size: 28,
-        font: fontBold,
+        font: font,
         color: pinkColor,
       });
 
       // Monto (muy grande, destacado)
       const amountText = `$${data.amount.toLocaleString('es-AR')}`;
       page.drawText(amountText, {
-        x: this.centerText(amountText, width, 42, fontBold),
+        x: this.centerText(amountText, width, 35, font),
         y: height - 260,
-        size: 42,
-        font: fontBold,
+        size: 35,
+        font: font,
         color: pinkColor,
       });
 
@@ -78,7 +82,9 @@ export class GiftCardPdfService {
       });
 
       // Válida hasta
-      const expirationFormatted = new Date(data.expirationDate).toLocaleDateString('es-AR');
+      const expirationFormatted = new Date(
+        data.expirationDate,
+      ).toLocaleDateString('es-AR');
       page.drawText(`Válida hasta: ${expirationFormatted}`, {
         x: 80,
         y: height - 400,
@@ -90,8 +96,13 @@ export class GiftCardPdfService {
       // Mensaje personalizado (si existe)
       if (data.personalMessage) {
         const maxWidth = width - 160; // 80px margen cada lado
-        const wrappedMessage = this.wrapText(data.personalMessage, maxWidth, 11, font);
-        
+        const wrappedMessage = this.wrapText(
+          data.personalMessage,
+          maxWidth,
+          11,
+          font,
+        );
+
         let yPosition = height - 450;
         page.drawText('Mensaje:', {
           x: 80,
@@ -158,7 +169,12 @@ export class GiftCardPdfService {
 
       // Footer con contacto
       page.drawText('Dra. Jaqueline Grassetti | @dra.jaquelinagrassetti', {
-        x: this.centerText('Dra. Jaqueline Grassetti | @dra.jaquelinagrassetti', width, 9, font),
+        x: this.centerText(
+          'Dra. Jaqueline Grassetti | @dra.jaquelinagrassetti',
+          width,
+          9,
+          font,
+        ),
         y: 30,
         size: 9,
         font: font,
@@ -167,19 +183,19 @@ export class GiftCardPdfService {
 
       // Generar PDF final
       const pdfBytes = await pdfDoc.save();
-      
+
       this.logger.log(`📄 PDF generado para gift card: ${data.code}`);
-      
+
       return Buffer.from(pdfBytes);
     } catch (error) {
       this.logger.error('Error generando PDF de gift card:', error);
-      
+
       // Si el template no existe, generar PDF básico
       if (error.code === 'ENOENT') {
         this.logger.warn('⚠️ Template PDF no encontrado, generando PDF básico');
         return await this.generateBasicPDF(data);
       }
-      
+
       throw error;
     }
   }
@@ -306,16 +322,29 @@ export class GiftCardPdfService {
     });
 
     // Footer
-    page.drawText('Válida por 90 días | No reembolsable | Puede usarse en uno o más tratamientos', {
-      x: this.centerText('Válida por 90 días | No reembolsable | Puede usarse en uno o más tratamientos', width, 8, font),
-      y: 60,
-      size: 8,
-      font: font,
-      color: grayColor,
-    });
+    page.drawText(
+      'Válida por 90 días | No reembolsable | Puede usarse en uno o más tratamientos',
+      {
+        x: this.centerText(
+          'Válida por 90 días | No reembolsable | Puede usarse en uno o más tratamientos',
+          width,
+          8,
+          font,
+        ),
+        y: 60,
+        size: 8,
+        font: font,
+        color: grayColor,
+      },
+    );
 
     page.drawText('Junín 191, Piso VIII, Consultorio I, Rosario - Sta. Fe', {
-      x: this.centerText('Junín 191, Piso VIII, Consultorio I, Rosario - Sta. Fe', width, 9, font),
+      x: this.centerText(
+        'Junín 191, Piso VIII, Consultorio I, Rosario - Sta. Fe',
+        width,
+        9,
+        font,
+      ),
       y: 40,
       size: 9,
       font: font,
@@ -329,7 +358,12 @@ export class GiftCardPdfService {
   /**
    * Centrar texto horizontalmente
    */
-  private centerText(text: string, pageWidth: number, fontSize: number, font: any): number {
+  private centerText(
+    text: string,
+    pageWidth: number,
+    fontSize: number,
+    font: any,
+  ): number {
     const textWidth = font.widthOfTextAtSize(text, fontSize);
     return (pageWidth - textWidth) / 2;
   }
@@ -337,7 +371,12 @@ export class GiftCardPdfService {
   /**
    * Dividir texto en líneas según ancho máximo
    */
-  private wrapText(text: string, maxWidth: number, fontSize: number, font: any): string[] {
+  private wrapText(
+    text: string,
+    maxWidth: number,
+    fontSize: number,
+    font: any,
+  ): string[] {
     const words = text.split(' ');
     const lines: string[] = [];
     let currentLine = '';
