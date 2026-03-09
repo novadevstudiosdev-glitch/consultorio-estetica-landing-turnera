@@ -42,6 +42,23 @@ export class GiftCardsService {
     return expiration;
   }
 
+  private formatDateForEmail(value?: string | Date | null): string {
+    if (!value) {
+      return '';
+    }
+
+    if (value instanceof Date) {
+      return value.toISOString().split('T')[0];
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return String(value);
+    }
+
+    return parsed.toISOString().split('T')[0];
+  }
+
   /**
    * Crear gift card (aún sin pagar)
    */
@@ -129,7 +146,7 @@ export class GiftCardsService {
           recipientName: activated.recipientName,
           code: activated.code,
           amount: activated.amount,
-          expirationDate: activated.expirationDate!.toISOString().split('T')[0],
+          expirationDate: this.formatDateForEmail(activated.expirationDate),
           purchaserName: activated.purchaserName,
           personalMessage: activated.personalMessage,
         });
@@ -147,7 +164,7 @@ export class GiftCardsService {
               recipientName: activated.recipientName,
               code: activated.code,
               amount: Number(activated.amount),
-              expirationDate: activated.expirationDate!.toISOString().split('T')[0],
+              expirationDate: this.formatDateForEmail(activated.expirationDate),
             },
           );
 
