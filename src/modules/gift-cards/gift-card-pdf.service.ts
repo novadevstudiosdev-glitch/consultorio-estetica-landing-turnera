@@ -51,7 +51,7 @@ export class GiftCardPdfService {
       const grayColor = rgb(0.4, 0.4, 0.4);
 
       // Posiciones (las que ajustaste)
-      page.drawText(data.code, {
+      this.drawPseudoBoldText(page, data.code, {
         x: this.centerText(data.code, width, 20, displayFont),
         y: height - 160,
         size: 20,
@@ -60,7 +60,7 @@ export class GiftCardPdfService {
       });
 
       const amountText = `$${data.amount.toLocaleString('es-AR')}`;
-      page.drawText(amountText, {
+      this.drawPseudoBoldText(page, amountText, {
         x: this.centerText(amountText, width, 20, displayFont),
         y: height - 200,
         size: 20,
@@ -141,7 +141,7 @@ export class GiftCardPdfService {
     );
     const displayFont = await this.getDisplayFont(pdfDoc, fallbackDisplayFont);
 
-    page.drawText(data.code, {
+    this.drawPseudoBoldText(page, data.code, {
       x: this.centerText(data.code, width, 28, displayFont),
       y: height - 250,
       size: 28,
@@ -150,7 +150,7 @@ export class GiftCardPdfService {
     });
 
     const amountText = `$${data.amount.toLocaleString('es-AR')}`;
-    page.drawText(amountText, {
+    this.drawPseudoBoldText(page, amountText, {
       x: this.centerText(amountText, width, 35, displayFont),
       y: height - 320,
       size: 35,
@@ -186,6 +186,21 @@ export class GiftCardPdfService {
   ): number {
     const textWidth = font.widthOfTextAtSize(text, fontSize);
     return (pageWidth - textWidth) / 2;
+  }
+
+  private drawPseudoBoldText(
+    page: any,
+    text: string,
+    options: {
+      x: number;
+      y: number;
+      size: number;
+      font: PDFFont;
+      color: any;
+    },
+  ): void {
+    page.drawText(text, options);
+    page.drawText(text, { ...options, x: options.x + 0.35 });
   }
 
   private async getDisplayFont(
