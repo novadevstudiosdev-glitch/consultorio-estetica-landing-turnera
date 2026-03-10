@@ -31,6 +31,7 @@ import {
 import { BlockedSlot } from '../blocked-slots/entities/blocked-slot.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { EmailService } from '../../common/services/email.service';
+import { WhatsappService } from '../../common/services/whatsapp.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -47,6 +48,7 @@ export class AppointmentsService {
     private configService: ConfigService,
     private servicesService: ServicesService,
     private emailService: EmailService,
+    private whatsappService: WhatsappService,
   ) {}
 
   /**
@@ -118,7 +120,6 @@ export class AppointmentsService {
       this.logger.error('Error enviando email de confirmación:', error);
       // No fallar si el email no se envía
     }
-
     return saved;
   }
 
@@ -256,6 +257,7 @@ export class AppointmentsService {
     updateAppointmentDto: UpdateAppointmentDto,
   ): Promise<Appointment> {
     const appointment = await this.findOne(id);
+    const previousStatus = appointment.status;
 
     if (
       updateAppointmentDto.appointmentDate ||
@@ -271,6 +273,34 @@ export class AppointmentsService {
 
     Object.assign(appointment, updateAppointmentDto);
     const updated = await this.appointmentsRepository.save(appointment);
+    const transitionedToConfirmed = this.didTransitionToConfirmed(
+      previousStatus,
+      updated.status,
+    );
+    this.logger.log(
+      `[WA-DIAG][appointments.update] appointmentId=${updated.id} previousStatus=${previousStatus} nextStatus=${updated.status} transitionedToConfirmed=${transitionedToConfirmed}`,
+    );
+
+    if (transitionedToConfirmed) {
+      try {
+        this.logger.log(
+          `[WA-DIAG][appointments.update] attempting sendAppointmentCreated appointmentId=${updated.id} patientPhone="${updated.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,
+        );
+        await this.whatsappService.sendAppointmentCreated({
+          appointmentId: updated.id,
+          patientName: updated.patientName,
+          patientPhone: updated.patientPhone,
+          serviceName: updated.service?.name ?? 'Turno',
+          date: this.formatAppointmentDate(updated.appointmentDate),
+          time: updated.appointmentTime,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Error enviando WhatsApp por cambio de estado a confirmado para turno ${updated.id}`,
+          error,
+        );
+      }
+    }
 
     this.logger.log(`Turno actualizado: ${updated.id}`);
     return updated;
@@ -413,6 +443,7 @@ export class AppointmentsService {
     cancelledBy: 'admin' | 'patient' = 'patient',
   ): Promise<Appointment> {
     const appointment = await this.findOne(id);
+    const previousStatus = appointment.status;
 
     if (appointment.status === AppointmentStatus.CANCELLED) {
       throw new BadRequestException('El turno ya está cancelado');
@@ -428,6 +459,11 @@ export class AppointmentsService {
     appointment.cancelledAt = new Date();
 
     const cancelled = await this.appointmentsRepository.save(appointment);
+    const transitionedFromConfirmedToCancelled =
+      this.didTransitionFromConfirmedToCancelled(previousStatus, cancelled.status);
+    this.logger.log(
+      `[WA-DIAG][appointments.cancel] appointmentId=${cancelled.id} previousStatus=${previousStatus} nextStatus=${cancelled.status} transitionedFromConfirmedToCancelled=${transitionedFromConfirmedToCancelled}`,
+    );
 
     this.logger.log(`Turno cancelado por ${cancelledBy}: ${cancelled.id}`);
 
@@ -445,6 +481,27 @@ export class AppointmentsService {
       );
     } catch (error) {
       this.logger.error('Error enviando email de cancelación:', error);
+    }
+    if (transitionedFromConfirmedToCancelled) {
+      try {
+        this.logger.log(
+          `[WA-DIAG][appointments.cancel] attempting sendAppointmentCancelled appointmentId=${cancelled.id} patientPhone="${cancelled.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,
+        );
+        await this.whatsappService.sendAppointmentCancelled({
+          appointmentId: cancelled.id,
+          patientName: cancelled.patientName,
+          patientPhone: cancelled.patientPhone,
+          serviceName: cancelled.service.name,
+          date: this.formatAppointmentDate(cancelled.appointmentDate),
+          time: cancelled.appointmentTime,
+          cancellationReason,
+        });
+      } catch (error) {
+        this.logger.error(
+          'Error enviando WhatsApp de cancelación de turno al cliente/doctora:',
+          error,
+        );
+      }
     }
 
     // Procesar reembolso si aplica
@@ -753,6 +810,35 @@ export class AppointmentsService {
     }
 
     return hours * 60 + minutes;
+  }
+
+  private formatAppointmentDate(date: string | Date): string {
+    if (date instanceof Date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    const raw = String(date ?? '').trim();
+    return raw.length > 0 ? raw : 'Sin fecha';
+  }
+
+  private didTransitionToConfirmed(
+    previousStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): boolean {
+    return (
+      previousStatus === AppointmentStatus.PENDING &&
+      nextStatus === AppointmentStatus.CONFIRMED
+    );
+  }
+
+  private didTransitionFromConfirmedToCancelled(
+    previousStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): boolean {
+    return (
+      previousStatus === AppointmentStatus.CONFIRMED &&
+      nextStatus === AppointmentStatus.CANCELLED
+    );
   }
 
   private getPendingTtlMinutes(): number {

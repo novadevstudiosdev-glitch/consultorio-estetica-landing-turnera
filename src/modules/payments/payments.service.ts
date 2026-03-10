@@ -2,7 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
 import type { PreferenceRequest } from 'mercadopago/dist/clients/preference/commonTypes';
 import {
@@ -15,6 +15,7 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { GiftCardsService } from '../gift-cards/gift-cards.service';
 import { GiftCardStatus } from '../gift-cards/entities/gift-card.entity';
 import { User } from '../users/entities/user.entity';
+import { WhatsappService } from '../../common/services/whatsapp.service';
 
 interface CreatePaymentDto {
   appointmentId: string;
@@ -37,6 +38,8 @@ export class PaymentsService {
     private configService: ConfigService,
     private appointmentsService: AppointmentsService,
     private giftCardsService: GiftCardsService,
+    private whatsappService: WhatsappService,
+    private dataSource: DataSource,
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
   ) {
@@ -78,6 +81,19 @@ export class PaymentsService {
 
   private getConfiguredTestPayerEmail(): string | undefined {
     return this.configService.get<string>('MP_TEST_PAYER_EMAIL')?.trim();
+  }
+
+  private shouldPreferAccountMoney(): boolean {
+    const raw = this.configService
+      .get<string>('MP_PREFER_ACCOUNT_MONEY')
+      ?.trim()
+      .toLowerCase();
+
+    if (!raw) {
+      return true;
+    }
+
+    return !['0', 'false', 'no', 'off'].includes(raw);
   }
 
   private normalizeEmail(email?: string): string | undefined {
@@ -163,6 +179,25 @@ export class PaymentsService {
       .join(' - ');
   }
 
+  private didTransitionToConfirmed(
+    previousStatus: AppointmentStatus,
+    nextStatus: AppointmentStatus,
+  ): boolean {
+    return (
+      previousStatus === AppointmentStatus.PENDING &&
+      nextStatus === AppointmentStatus.CONFIRMED
+    );
+  }
+
+  private formatAppointmentDate(date: string | Date): string {
+    if (date instanceof Date) {
+      return date.toISOString().split('T')[0];
+    }
+
+    const raw = String(date ?? '').trim();
+    return raw.length > 0 ? raw : 'Sin fecha';
+  }
+
   async createPaymentPreference(
     createPaymentDto: CreatePaymentDto,
     user?: Pick<User, 'email' | 'fullName'>,
@@ -225,6 +260,12 @@ export class PaymentsService {
           patient_name: appointment.patientName,
         },
       };
+
+      if (this.shouldPreferAccountMoney()) {
+        preferenceData.payment_methods = {
+          default_payment_method_id: 'account_money',
+        };
+      }
 
       const requestedPayerEmail = this.normalizeEmail(
         createPaymentDto.payer?.email,
@@ -306,12 +347,17 @@ export class PaymentsService {
           depositAmount,
           paymentDescription,
           payerEmail: preferenceData.payer?.email ?? null,
+          defaultPaymentMethodId:
+            preferenceData.payment_methods?.default_payment_method_id ?? null,
           successUrl,
           failureUrl,
           pendingUrl,
           notificationUrl: hasHttpsNotificationUrl ? notificationUrl : null,
           isTestMode: this.isTestAccessToken(accessToken),
         })}`,
+      );
+      this.logger.log(
+        `[WA-DIAG][payments.preference] appointmentId=${appointment.id} hasHttpsBackUrls=${hasHttpsBackUrls} hasHttpsNotificationUrl=${hasHttpsNotificationUrl} notificationUrl=${hasHttpsNotificationUrl ? notificationUrl : 'omitted'}`,
       );
 
       const response = await this.preference.create({ body: preferenceData });
@@ -462,67 +508,132 @@ export class PaymentsService {
       return false;
     }
 
-    let appointment: Appointment;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    let appointment: Appointment | null = null;
+    let previousStatus: AppointmentStatus | null = null;
+
     try {
-      appointment = await this.appointmentsService.findOne(appointmentId);
-    } catch (error) {
-      this.logger.warn(
-        `No se encontro turno para external_reference ${appointmentId}. Origen: ${source}.`,
-      );
-      return false;
-    }
+      appointment = await queryRunner.manager
+        .getRepository(Appointment)
+        .createQueryBuilder('appointment')
+        .where('appointment.id = :appointmentId', { appointmentId })
+        .setLock('pessimistic_write')
+        .getOne();
 
-    if (
-      paymentInfo.status === 'approved' &&
-      appointment.status === AppointmentStatus.CANCELLED
-    ) {
-      this.logger.warn(
-        `Pago aprobado para turno cancelado ${appointmentId}. Se mantiene cancelado para revision manual.`,
-      );
-      return false;
-    }
-
-    switch (paymentInfo.status) {
-      case 'approved':
-        appointment.status = AppointmentStatus.CONFIRMED;
-        appointment.paymentStatus = PaymentStatus.PAID;
-        appointment.paymentMethod = PaymentMethod.MP;
-        appointment.paymentId = paymentId.toString();
-        appointment.depositPaid = Number(paymentInfo.transaction_amount ?? 0);
-        this.logger.log(`✅ Pago aprobado para turno ${appointmentId}`);
-        break;
-
-      case 'pending':
-      case 'in_process':
-        appointment.paymentStatus = PaymentStatus.PENDING;
-        this.logger.log(`⏳ Pago pendiente para turno ${appointmentId}`);
-        break;
-
-      case 'rejected':
-      case 'cancelled':
-        appointment.paymentStatus = PaymentStatus.PENDING;
-        this.logger.log(`❌ Pago rechazado para turno ${appointmentId}`);
-        break;
-
-      case 'refunded':
-        appointment.paymentStatus = PaymentStatus.REFUNDED;
-        this.logger.log(`💸 Pago reembolsado para turno ${appointmentId}`);
-        break;
-
-      default:
+      if (!appointment) {
         this.logger.warn(
-          `Estado de pago no manejado para turno ${appointmentId}: ${paymentInfo.status}`,
+          `No se encontro turno para external_reference ${appointmentId}. Origen: ${source}.`,
         );
         return false;
-    }
+      }
 
-    await this.appointmentsRepository.save(appointment);
-    return true;
+      previousStatus = appointment.status;
+      this.logger.log(
+        `[WA-DIAG][payments.sync] source=${source} appointmentId=${appointmentId} paymentId=${paymentId} previousStatus=${previousStatus} paymentStatusFromMP=${String(paymentInfo?.status ?? '')}`,
+      );
+
+      if (
+        paymentInfo.status === 'approved' &&
+        appointment.status === AppointmentStatus.CANCELLED
+      ) {
+        this.logger.warn(
+          `Pago aprobado para turno cancelado ${appointmentId}. Se mantiene cancelado para revision manual.`,
+        );
+        return false;
+      }
+
+      switch (paymentInfo.status) {
+        case 'approved':
+          appointment.status = AppointmentStatus.CONFIRMED;
+          appointment.paymentStatus = PaymentStatus.PAID;
+          appointment.paymentMethod = PaymentMethod.MP;
+          appointment.paymentId = paymentId.toString();
+          appointment.depositPaid = Number(paymentInfo.transaction_amount ?? 0);
+          this.logger.log(`Pago aprobado para turno ${appointmentId}`);
+          break;
+
+        case 'pending':
+        case 'in_process':
+          appointment.paymentStatus = PaymentStatus.PENDING;
+          this.logger.log(`Pago pendiente para turno ${appointmentId}`);
+          break;
+
+        case 'rejected':
+        case 'cancelled':
+          appointment.paymentStatus = PaymentStatus.PENDING;
+          this.logger.log(`Pago rechazado para turno ${appointmentId}`);
+          break;
+
+        case 'refunded':
+          appointment.paymentStatus = PaymentStatus.REFUNDED;
+          this.logger.log(`Pago reembolsado para turno ${appointmentId}`);
+          break;
+
+        default:
+          this.logger.warn(
+            `Estado de pago no manejado para turno ${appointmentId}: ${paymentInfo.status}`,
+          );
+          return false;
+      }
+
+      await queryRunner.manager.getRepository(Appointment).save(appointment);
+      await queryRunner.commitTransaction();
+
+      const transitionedToConfirmed = this.didTransitionToConfirmed(
+        previousStatus,
+        appointment.status,
+      );
+      this.logger.log(
+        `[WA-DIAG][payments.sync] source=${source} appointmentId=${appointmentId} previousStatus=${previousStatus} nextStatus=${appointment.status} transitionedToConfirmed=${transitionedToConfirmed}`,
+      );
+
+      if (transitionedToConfirmed) {
+        try {
+          this.logger.log(
+            `[WA-DIAG][payments.sync] attempting sendAppointmentCreated appointmentId=${appointmentId} patientPhone="${appointment.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,
+          );
+          await this.whatsappService.sendAppointmentCreated({
+            appointmentId,
+            patientName: appointment.patientName,
+            patientPhone: appointment.patientPhone,
+            serviceName: appointment.service?.name ?? 'Turno',
+            date: this.formatAppointmentDate(appointment.appointmentDate),
+            time: appointment.appointmentTime,
+          });
+        } catch (error) {
+          this.logger.error(
+            `Error enviando WhatsApp de confirmacion para turno ${appointmentId}`,
+            error,
+          );
+        }
+      } else {
+        this.logger.log(
+          `[WA-DIAG][payments.sync] skipping sendAppointmentCreated appointmentId=${appointmentId} because transition condition is false`,
+        );
+      }
+
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Error sincronizando pago ${paymentId} para turno ${appointmentId}. Origen: ${source}.`,
+        error as Error,
+      );
+      return false;
+    } finally {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
+      await queryRunner.release();
+    }
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
   async reconcilePendingPaymentsCron(): Promise<void> {
     try {
+      this.logger.log('[WA-DIAG][payments.reconcile.cron] tick');
       await this.reconcilePendingApprovedPayments();
     } catch (error) {
       this.logger.error('Error en reconciliacion de pagos pendientes', error);
@@ -545,6 +656,9 @@ export class PaymentsService {
       .orderBy('appointment.createdAt', 'DESC')
       .take(20)
       .getMany();
+    this.logger.log(
+      `[WA-DIAG][payments.reconcile] pendingAppointments=${pendingAppointments.length}`,
+    );
 
     if (pendingAppointments.length === 0) {
       return 0;
@@ -717,18 +831,30 @@ export class PaymentsService {
       body,
       query,
     );
+    this.logger.log(
+      `[WA-DIAG][payments.webhook] resolvedType=${type ?? 'n/a'} paymentId=${paymentId ?? 'n/a'} payload=${JSON.stringify(payload)}`,
+    );
     this.logger.log(`Webhook recibido: ${JSON.stringify(payload)}`);
 
     if (type && type !== 'payment') {
+      this.logger.log(
+        `[WA-DIAG][payments.webhook] ignoredType=${type ?? 'unknown'} paymentId=${paymentId ?? 'n/a'}`,
+      );
       this.logger.log(`Webhook ignorado para tipo ${type ?? 'desconocido'}`);
       return;
     }
 
     if (!paymentId) {
+      this.logger.warn(
+        `[WA-DIAG][payments.webhook] missingPaymentId payload=${JSON.stringify(payload)}`,
+      );
       throw new BadRequestException('Webhook de pago sin id valido');
     }
 
     const paymentInfo = await this.getPaymentInfo(paymentId);
+    this.logger.log(
+      `[WA-DIAG][payments.webhook] paymentId=${paymentId} paymentStatusFromMP=${String(paymentInfo?.status ?? '')} externalReference=${String(paymentInfo?.external_reference ?? '')}`,
+    );
 
     if (!paymentInfo) {
       throw new BadRequestException(
@@ -882,3 +1008,4 @@ export class PaymentsService {
     }
   }
 }
+
