@@ -130,10 +130,10 @@ export class EmailService {
       time: string;
       depositAmount?: number;
     },
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!this.resend) {
       this.logger.warn(`📧 [SIMULATED] Appointment confirmation to ${email}`);
-      return;
+      return false;
     }
 
     const html = this.getAppointmentConfirmationTemplate(appointmentData);
@@ -151,12 +151,14 @@ export class EmailService {
       this.logger.log(
         `📧 Appointment confirmation sent to ${email} (ID: ${data?.id})`,
       );
+      return true;
     } catch (error) {
       this.logger.error(
         `❌ Error sending appointment confirmation to ${email}:`,
         error,
       );
       // No bloquea la creación del turno
+      return false;
     }
   }
 

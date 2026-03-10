@@ -104,22 +104,6 @@ export class AppointmentsService {
       `Turno creado: ${saved.patientName} - ${saved.appointmentDate} ${saved.appointmentTime}`,
     );
 
-    // Enviar email de confirmación
-    try {
-      await this.emailService.sendAppointmentConfirmation(saved.patientEmail, {
-        patientName: saved.patientName,
-        serviceName: service.name,
-        date: saved.appointmentDate.toString(),
-        time: saved.appointmentTime,
-        depositAmount: service.depositAmount,
-      });
-
-      saved.confirmationSent = true;
-      await this.appointmentsRepository.save(saved);
-    } catch (error) {
-      this.logger.error('Error enviando email de confirmación:', error);
-      // No fallar si el email no se envía
-    }
     return saved;
   }
 
@@ -158,18 +142,21 @@ export class AppointmentsService {
     // Enviar confirmación si el turno está confirmado
     if (saved.status === AppointmentStatus.CONFIRMED) {
       try {
-        await this.emailService.sendAppointmentConfirmation(
-          saved.patientEmail,
-          {
-            patientName: saved.patientName,
-            serviceName: service.name,
-            date: saved.appointmentDate.toString(),
-            time: saved.appointmentTime,
-          },
-        );
+        const confirmationSent =
+          await this.emailService.sendAppointmentConfirmation(
+            saved.patientEmail,
+            {
+              patientName: saved.patientName,
+              serviceName: service.name,
+              date: saved.appointmentDate.toString(),
+              time: saved.appointmentTime,
+            },
+          );
 
-        saved.confirmationSent = true;
-        await this.appointmentsRepository.save(saved);
+        if (confirmationSent && !saved.confirmationSent) {
+          saved.confirmationSent = true;
+          await this.appointmentsRepository.save(saved);
+        }
       } catch (error) {
         this.logger.error('Error enviando email:', error);
       }
@@ -297,6 +284,32 @@ export class AppointmentsService {
       } catch (error) {
         this.logger.error(
           `Error enviando WhatsApp por cambio de estado a confirmado para turno ${updated.id}`,
+          error,
+        );
+      }
+
+      try {
+        if (!updated.confirmationSent) {
+          const confirmationSent =
+            await this.emailService.sendAppointmentConfirmation(
+              updated.patientEmail,
+              {
+                patientName: updated.patientName,
+                serviceName: updated.service?.name ?? 'Turno',
+                date: updated.appointmentDate.toString(),
+                time: updated.appointmentTime,
+                depositAmount: updated.service?.depositAmount,
+              },
+            );
+
+          if (confirmationSent) {
+            updated.confirmationSent = true;
+            await this.appointmentsRepository.save(updated);
+          }
+        }
+      } catch (error) {
+        this.logger.error(
+          `Error enviando email de confirmacion para turno ${updated.id}`,
           error,
         );
       }
