@@ -756,6 +756,8 @@ export class EmailService {
     date: string;
     time: string;
   }): string {
+    const appointmentsUrl = this.getPatientAppointmentsUrl();
+
     return this.getBaseEmailTemplate({
       preheader: 'Recordatorio: tenés un turno pronto.',
       title: 'Recordatorio de turno',
@@ -768,8 +770,9 @@ export class EmailService {
           <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
           <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
         </div>
-        <p style="margin-top:14px;">Si necesitás reprogramar, hacelo desde la app.</p>
+        <p style="margin-top:14px;">Si necesitás reprogramar, podés hacerlo desde tu cuenta.</p>
       `,
+      cta: { label: 'Reprogramar turno', url: appointmentsUrl },
     });
   }
 
@@ -780,6 +783,8 @@ export class EmailService {
     time: string;
     reason?: string;
   }): string {
+    const appointmentsUrl = this.getPatientAppointmentsUrl();
+
     return this.getBaseEmailTemplate({
       preheader: 'Tu turno fue cancelado.',
       title: 'Turno cancelado',
@@ -793,9 +798,16 @@ export class EmailService {
           <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
           ${data.reason ? `<p class="infoRow"><strong>Motivo:</strong> ${data.reason}</p>` : ''}
         </div>
-        <p style="margin-top:14px;">Podés reagendar cuando quieras desde la app.</p>
+        <p style="margin-top:14px;">Podés reagendar cuando quieras desde tu cuenta.</p>
       `,
+      cta: { label: 'Reservar/Reprogramar', url: appointmentsUrl },
     });
+  }
+
+  private getPatientAppointmentsUrl(): string {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
+    return `${frontendUrl.replace(/\/+$/, '')}/mis-turnos`;
   }
 
   // Gift card para destinatario
