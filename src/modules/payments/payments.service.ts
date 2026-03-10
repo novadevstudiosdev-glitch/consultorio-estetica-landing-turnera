@@ -16,6 +16,7 @@ import { GiftCardsService } from '../gift-cards/gift-cards.service';
 import { GiftCardStatus } from '../gift-cards/entities/gift-card.entity';
 import { User } from '../users/entities/user.entity';
 import { WhatsappService } from '../../common/services/whatsapp.service';
+import { EmailService } from '../../common/services/email.service';
 
 interface CreatePaymentDto {
   appointmentId: string;
@@ -39,6 +40,7 @@ export class PaymentsService {
     private appointmentsService: AppointmentsService,
     private giftCardsService: GiftCardsService,
     private whatsappService: WhatsappService,
+    private emailService: EmailService,
     private dataSource: DataSource,
     @InjectRepository(Appointment)
     private appointmentsRepository: Repository<Appointment>,
@@ -607,6 +609,47 @@ export class PaymentsService {
           this.logger.error(
             `Error enviando WhatsApp de confirmacion para turno ${appointmentId}`,
             error,
+          );
+        }
+
+        try {
+          const appointmentWithService =
+            await this.appointmentsRepository.findOne({
+              where: { id: appointmentId },
+              relations: ['service'],
+            });
+
+          if (!appointmentWithService) {
+            this.logger.warn(
+              `No se encontro turno confirmado para enviar email: ${appointmentId}`,
+            );
+          } else if (appointmentWithService.confirmationSent) {
+            this.logger.log(
+              `[payments.sync] confirmation email ya enviado para turno ${appointmentId}`,
+            );
+          } else {
+            const confirmationSent =
+              await this.emailService.sendAppointmentConfirmation(
+              appointmentWithService.patientEmail,
+              {
+                patientName: appointmentWithService.patientName,
+                serviceName:
+                  appointmentWithService.service?.name ?? 'Turno',
+                date: appointmentWithService.appointmentDate.toString(),
+                time: appointmentWithService.appointmentTime,
+                depositAmount:
+                  appointmentWithService.service?.depositAmount ?? undefined,
+              },
+              );
+            if (confirmationSent) {
+              appointmentWithService.confirmationSent = true;
+              await this.appointmentsRepository.save(appointmentWithService);
+            }
+          }
+        } catch (error) {
+          this.logger.error(
+            `Error enviando email de confirmacion para turno ${appointmentId}`,
+            error as Error,
           );
         }
       } else {

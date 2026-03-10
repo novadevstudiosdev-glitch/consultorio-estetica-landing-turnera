@@ -6,6 +6,7 @@ import { Appointment } from '../appointments/entities/appointment.entity';
 import { AppointmentsModule } from '../appointments/appointments.module';
 import { GiftCardsModule } from '../gift-cards/gift-cards.module';
 import { WhatsappService } from '../../common/services/whatsapp.service';
+import { EmailService } from '../../common/services/email.service';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { WhatsappService } from '../../common/services/whatsapp.service';
     GiftCardsModule, // Para usar GiftCardsService
   ],
   controllers: [PaymentsController],
-  providers: [PaymentsService, WhatsappService],
+  providers: [PaymentsService, WhatsappService, EmailService],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}
