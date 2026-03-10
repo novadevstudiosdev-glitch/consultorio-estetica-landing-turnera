@@ -9,6 +9,8 @@ import {
   UseGuards,
   Param,
   ParseUUIDPipe,
+  Req,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,10 +26,13 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../users/entities/user.entity';
 import { User } from '../users/entities/user.entity';
+import { Request } from 'express';
 
 @ApiTags('Payments')
 @Controller('payments')
 export class PaymentsController {
+  private readonly logger = new Logger(PaymentsController.name);
+
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post('create-preference')
@@ -36,7 +41,7 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Crear preferencia de pago para un turno',
     description:
-      'Genera un link de pago de Mercado Pago para la seña del turno',
+      'Genera un link de pago de Mercado Pago para la seï¿½a del turno',
   })
   @ApiResponse({
     status: 201,
@@ -115,5 +120,32 @@ export class PaymentsController {
       message: 'Reembolso procesado exitosamente',
       appointmentId,
     };
+  }
+
+  @Post('gift-card/:giftCardId/create-preference')
+  @Public()
+  @ApiOperation({
+    summary: 'Crear preferencia de pago para gift card (pÃºblico)',
+    description:
+      'Genera link de pago de Mercado Pago para comprar una gift card',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Preferencia creada exitosamente',
+    schema: {
+      type: 'object',
+      properties: {
+        preferenceId: { type: 'string' },
+        initPoint: { type: 'string' },
+        sandboxInitPoint: { type: 'string' },
+      },
+    },
+  })
+  async createGiftCardPreference(
+    @Param('giftCardId', ParseUUIDPipe) giftCardId: string,
+  ) {
+    return await this.paymentsService.createGiftCardPaymentPreference(
+      giftCardId,
+    );
   }
 }

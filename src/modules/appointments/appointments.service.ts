@@ -4,6 +4,8 @@ import {
   BadRequestException,
   ConflictException,
   Logger,
+  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -19,6 +21,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import {
   UpdateAppointmentDto,
   AdminCreateAppointmentDto,
+  RescheduleAppointmentDto,
 } from './dto/update-appointment.dto';
 import { ServicesService } from '../services/services.service';
 import {
@@ -26,6 +29,7 @@ import {
   DayOfWeek,
 } from '../business-hours/entities/business-hours.entity';
 import { BlockedSlot } from '../blocked-slots/entities/blocked-slot.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { EmailService } from '../../common/services/email.service';
 import { WhatsappService } from '../../common/services/whatsapp.service';
 
@@ -299,6 +303,134 @@ export class AppointmentsService {
     }
 
     this.logger.log(`Turno actualizado: ${updated.id}`);
+    return updated;
+  }
+
+  /**
+   * Reprogramar turno
+   */
+  async reschedule(
+    id: string,
+    rescheduleDto: RescheduleAppointmentDto,
+    user?: User,
+  ): Promise<Appointment> {
+    const appointment = await this.findOne(id);
+
+    // Verificar permisos
+    if (user) {
+      const isAdmin = user.role === UserRole.ADMIN;
+      const isOwner = appointment.patientEmail === user.email;
+
+      if (!isAdmin && !isOwner) {
+        throw new ForbiddenException(
+          'No tienes permiso para reprogramar este turno',
+        );
+      }
+    } else {
+      // Sin autenticación, no puede reprogramar
+      throw new UnauthorizedException(
+        'Debes iniciar sesión para reprogramar un turno',
+      );
+    }
+
+    // Validar que el turno no esté cancelado o completado
+    if (appointment.status === AppointmentStatus.CANCELLED) {
+      throw new BadRequestException(
+        'No se puede reprogramar un turno cancelado',
+      );
+    }
+
+    if (appointment.status === AppointmentStatus.COMPLETED) {
+      throw new BadRequestException(
+        'No se puede reprogramar un turno completado',
+      );
+    }
+
+    // Validar que la nueva fecha/hora sea futura
+    const now = new Date();
+    const newDateTime = new Date(
+      `${rescheduleDto.appointmentDate}T${rescheduleDto.appointmentTime}`,
+    );
+
+    if (newDateTime <= now) {
+      throw new BadRequestException(
+        'La nueva fecha y hora deben ser en el futuro',
+      );
+    }
+
+    // Validar horarios de negocio
+    await this.validateBusinessHours(
+      rescheduleDto.appointmentDate,
+      rescheduleDto.appointmentTime,
+    );
+
+    // Validar slots bloqueados
+    await this.validateNotBlocked(
+      rescheduleDto.appointmentDate,
+      rescheduleDto.appointmentTime,
+    );
+
+    // Validar disponibilidad (que no haya otro turno en ese slot)
+    const conflictingAppointment = await this.appointmentsRepository.findOne({
+      where: {
+        appointmentDate: rescheduleDto.appointmentDate as any,
+        appointmentTime: rescheduleDto.appointmentTime,
+        status: AppointmentStatus.CONFIRMED,
+      },
+    });
+
+    if (conflictingAppointment && conflictingAppointment.id !== id) {
+      throw new BadRequestException(
+        `Ya existe un turno confirmado para ${rescheduleDto.appointmentDate} a las ${rescheduleDto.appointmentTime}`,
+      );
+    }
+
+    // Guardar fecha/hora anterior para el email
+    const previousDate =
+      appointment.appointmentDate instanceof Date
+        ? appointment.appointmentDate.toISOString().split('T')[0]
+        : String(appointment.appointmentDate);
+    const previousTime = appointment.appointmentTime;
+
+    // Actualizar fecha y hora
+    appointment.appointmentDate = rescheduleDto.appointmentDate as any;
+    appointment.appointmentTime = rescheduleDto.appointmentTime;
+
+    // Agregar notas sobre el cambio
+    const changeNote = `[${new Date().toISOString()}] Reprogramado de ${previousDate} ${previousTime} a ${rescheduleDto.appointmentDate} ${rescheduleDto.appointmentTime}${rescheduleDto.reason ? ` - Razón: ${rescheduleDto.reason}` : ''}`;
+    appointment.notes = appointment.notes
+      ? `${appointment.notes}\n${changeNote}`
+      : changeNote;
+
+    const updated = await this.appointmentsRepository.save(appointment);
+
+    // Enviar email de notificación del cambio
+    try {
+      await this.emailService.sendAppointmentRescheduled(
+        appointment.patientEmail,
+        {
+          patientName: appointment.patientName,
+          serviceName: appointment.service.name,
+          previousDate,
+          previousTime,
+          newDate: rescheduleDto.appointmentDate,
+          newTime: rescheduleDto.appointmentTime,
+          reason: rescheduleDto.reason,
+        },
+      );
+
+      this.logger.log(
+        `📧 Email de reprogramación enviado a ${appointment.patientEmail}`,
+      );
+    } catch (error) {
+      this.logger.error('Error enviando email de reprogramación:', error);
+      // No bloquea la reprogramación
+    }
+
+    this.logger.log(
+      `📅 Turno reprogramado: ${id} - De ${previousDate} ${previousTime} a ${rescheduleDto.appointmentDate} ${rescheduleDto.appointmentTime}`,
+    );
+
     return updated;
   }
 
@@ -723,7 +855,7 @@ export class AppointmentsService {
   }
 
   /**
-   * Obtener dÃ­a de la semana (sin conversiÃ³n de timezone)
+   * Obtener dí­a de la semana (sin conversión de timezone)
    */
   private getDayOfWeek(dateString: string | Date): DayOfWeek {
     let date: Date;
@@ -746,6 +878,14 @@ export class AppointmentsService {
       DayOfWeek.SATURDAY,
     ];
 
-    return days[date.getDay()];
+    const dayIndex = date.getDay();
+    const dayName = days[dayIndex];
+
+    // Debug log
+    this.logger.debug(
+      `📅 Fecha: ${typeof dateString === 'string' ? dateString : date.toISOString().split('T')[0]} → Día de la semana: ${dayName} (index: ${dayIndex})`,
+    );
+
+    return dayName;
   }
 }

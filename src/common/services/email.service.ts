@@ -161,6 +161,51 @@ export class EmailService {
   }
 
   /**
+   * Enviar email de turno reprogramado
+   */
+  async sendAppointmentRescheduled(
+    email: string,
+    appointmentData: {
+      patientName: string;
+      serviceName: string;
+      previousDate: string;
+      previousTime: string;
+      newDate: string;
+      newTime: string;
+      reason?: string;
+    },
+  ): Promise<void> {
+    if (!this.resend) {
+      this.logger.warn(
+        `📧 [SIMULATED] Appointment rescheduled email to ${email}`,
+      );
+      return;
+    }
+
+    const html = this.getAppointmentRescheduledTemplate(appointmentData);
+
+    try {
+      const { data, error } = await this.resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: email,
+        subject: 'Turno reprogramado - Turnera Médica',
+        html,
+      });
+
+      if (error) throw error;
+
+      this.logger.log(
+        `📧 Appointment rescheduled email sent to ${email} (ID: ${data?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error sending appointment rescheduled email to ${email}:`,
+        error,
+      );
+    }
+  }
+
+  /**
    * Enviar recordatorio de turno (24 horas antes)
    */
   async sendAppointmentReminder(
@@ -241,6 +286,104 @@ export class EmailService {
     }
   }
 
+  /**
+   * Enviar gift card por email CON PDF ADJUNTO
+   */
+  async sendGiftCardEmail(
+    to: string,
+    data: {
+      recipientName: string;
+      code: string;
+      amount: number;
+      expirationDate: string;
+      purchaserName: string;
+      personalMessage?: string;
+    },
+    pdfBuffer?: Buffer, // AGREGAR PARÁMETRO OPCIONAL
+  ): Promise<void> {
+    if (!this.resend) {
+      this.logger.warn(`📧 [SIMULATED] Gift card email to ${to}`);
+      this.logger.warn(`Code: ${data.code}, Amount: $${data.amount}`);
+      return;
+    }
+
+    const html = this.getGiftCardEmailTemplate(data);
+
+    try {
+      const emailData: any = {
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to,
+        subject: 'Gift Card confirmada - Consultorio Dra. Jaquelina Grassetti',
+        html,
+      };
+
+      // Si hay PDF, adjuntarlo
+      if (pdfBuffer) {
+        emailData.attachments = [
+          {
+            filename: `GiftCard-${data.code}.pdf`,
+            content: pdfBuffer,
+          },
+        ];
+      }
+
+      const { data: emailResponse, error } =
+        await this.resend.emails.send(emailData);
+
+      if (error) throw error;
+
+      this.logger.log(
+        `📧 Gift Card email sent to ${to} (Code: ${data.code}, ID: ${emailResponse?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(`❌ Error sending gift card email to ${to}:`, error);
+      throw error;
+    }
+  }
+
+  async sendGiftCardPurchaseConfirmation(
+    to: string,
+    data: {
+      purchaserName: string;
+      recipientName: string;
+      code: string;
+      amount: number;
+      expirationDate: string;
+    },
+  ): Promise<void> {
+    if (!this.resend) {
+      this.logger.warn(
+        `📧 [SIMULATED] Gift card purchase confirmation to ${to}`,
+      );
+      this.logger.warn(`Code: ${data.code}, Amount: $${data.amount}`);
+      return;
+    }
+
+    const html = this.getGiftCardPurchaseConfirmationTemplate(data);
+
+    try {
+      const { data: emailData, error } = await this.resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to,
+        subject:
+          'Compra de Gift Card confirmada - Consultorio Dra. Jaquelina Grassetti',
+        html,
+      });
+
+      if (error) throw error;
+
+      this.logger.log(
+        `📧 Gift Card purchase confirmation sent to ${to} (Code: ${data.code}, ID: ${emailData?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error sending purchase confirmation to ${to}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
   // ============================================================
   // BASE TEMPLATE (ESTÉTICA ROSA / PRO)
   // ============================================================
@@ -253,7 +396,7 @@ export class EmailService {
     bodyHtml: string;
     cta?: { label: string; url: string };
     footerLines?: string[];
-    variant?: 'default' | 'success' | 'warning' | 'danger';
+    variant?: 'default' | 'success' | 'warning' | 'danger' | 'gift';
   }): string {
     const {
       preheader = '',
@@ -282,6 +425,7 @@ export class EmailService {
       success: '#BFA2AA',
       warning: '#D9A3AE',
       danger: '#C17886',
+      gift: '#E91E63',
     };
 
     const variantMap = {
@@ -305,12 +449,21 @@ export class EmailService {
         accentSoft: '#F7E6EA',
         label: 'Cancelado',
       },
+      // 🔥 AGREGAR variant para gift cards
+      gift: {
+        accent: COLORS.gift,
+        accentSoft: '#FCE4EC',
+        label: 'Gift Card',
+      },
     }[variant];
 
     const businessName =
-      this.configService.get('BUSINESS_NAME') || 'Turnera Médica';
-    const businessAddress = this.configService.get('BUSINESS_ADDRESS') || '';
-    const businessPhone = this.configService.get('BUSINESS_PHONE') || '';
+      this.configService.get('BUSINESS_NAME') || 'Dra. Jaquelina Grassetti';
+    const businessAddress =
+      this.configService.get('BUSINESS_ADDRESS') ||
+      'Junín 191, Piso VIII, Consultorio I, Rosario - Sta. Fe';
+    const businessPhone =
+      this.configService.get('BUSINESS_PHONE') || '+54 9 341 7511529';
     const footerDefault = [businessName, businessAddress, businessPhone].filter(
       Boolean,
     );
@@ -384,7 +537,7 @@ export class EmailService {
     }
 
     .infoRow { margin:0 0 8px 0; font-size:14px; }
-    .infoRow strong { display:inline-block; min-width:72px; }
+    .infoLabel { display:inline-block; min-width:72px; }
 
     .ctaWrap { text-align:center; padding:10px 26px 22px 26px; }
 
@@ -547,12 +700,64 @@ export class EmailService {
     });
   }
 
+  private getAppointmentRescheduledTemplate(data: {
+    patientName: string;
+    serviceName: string;
+    previousDate: string;
+    previousTime: string;
+    newDate: string;
+    newTime: string;
+    reason?: string;
+  }): string {
+    return this.getBaseEmailTemplate({
+      preheader: 'Tu turno ha sido reprogramado.',
+      title: 'Turno reprogramado',
+      greetingName: data.patientName,
+      variant: 'warning',
+      introHtml: `<p class="muted">Tu turno ha sido reprogramado con los siguientes cambios:</p>`,
+      bodyHtml: `
+      <div class="infoBox" style="background: #fff9f5;">
+        <p style="margin: 0 0 12px 0; font-weight: bold; color: #e91e63;">📅 Turno Anterior</p>
+        <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+        <p class="infoRow"><strong>Fecha:</strong> ${data.previousDate}</p>
+        <p class="infoRow"><strong>Hora:</strong> ${data.previousTime}</p>
+      </div>
+
+      <div style="text-align: center; margin: 20px 0;">
+        <p style="font-size: 24px; color: #e91e63;">⬇️</p>
+      </div>
+
+      <div class="infoBox" style="background: #f0fff4; border-color: #4caf50;">
+        <p style="margin: 0 0 12px 0; font-weight: bold; color: #4caf50;">📅 Nuevo Turno</p>
+        <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+        <p class="infoRow"><strong>Fecha:</strong> ${data.newDate}</p>
+        <p class="infoRow"><strong>Hora:</strong> ${data.newTime}</p>
+      </div>
+
+      ${
+        data.reason
+          ? `
+      <div class="infoBox">
+        <p class="infoRow" style="margin: 0;"><strong>Motivo:</strong> ${data.reason}</p>
+      </div>
+      `
+          : ''
+      }
+
+      <p style="margin-top: 20px;">Si este cambio no fue solicitado por vos, por favor contactanos de inmediato.</p>
+      <p style="margin-top: 14px;">Te esperamos en la nueva fecha 🌸</p>
+    `,
+    });
+  }
+
   private getAppointmentReminderTemplate(data: {
     patientName: string;
     serviceName: string;
     date: string;
     time: string;
   }): string {
+    const appointmentsUrl = this.getPatientAppointmentsUrl();
+
     return this.getBaseEmailTemplate({
       preheader: 'Recordatorio: tenés un turno pronto.',
       title: 'Recordatorio de turno',
@@ -565,8 +770,9 @@ export class EmailService {
           <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
           <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
         </div>
-        <p style="margin-top:14px;">Si necesitás reprogramar, hacelo desde la app.</p>
+        <p style="margin-top:14px;">Si necesitás reprogramar, podés hacerlo desde tu cuenta.</p>
       `,
+      cta: { label: 'Reprogramar turno', url: appointmentsUrl },
     });
   }
 
@@ -577,6 +783,8 @@ export class EmailService {
     time: string;
     reason?: string;
   }): string {
+    const appointmentsUrl = this.getPatientAppointmentsUrl();
+
     return this.getBaseEmailTemplate({
       preheader: 'Tu turno fue cancelado.',
       title: 'Turno cancelado',
@@ -590,8 +798,109 @@ export class EmailService {
           <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
           ${data.reason ? `<p class="infoRow"><strong>Motivo:</strong> ${data.reason}</p>` : ''}
         </div>
-        <p style="margin-top:14px;">Podés reagendar cuando quieras desde la app.</p>
+        <p style="margin-top:14px;">Podés reagendar cuando quieras desde tu cuenta.</p>
       `,
+      cta: { label: 'Reservar/Reprogramar', url: appointmentsUrl },
+    });
+  }
+
+  private getPatientAppointmentsUrl(): string {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
+    return `${frontendUrl.replace(/\/+$/, '')}/mis-turnos`;
+  }
+
+  // Gift card para destinatario
+  private getGiftCardEmailTemplate(data: {
+    recipientName: string;
+    code: string;
+    amount: number;
+    expirationDate: string;
+    purchaserName: string;
+    personalMessage?: string;
+  }): string {
+    const whatsappUrl = `https://wa.me/5493417511529?text=Hola!%20Tengo%20una%20Gift%20Card%20con%20codigo%20${data.code}`;
+
+    return this.getBaseEmailTemplate({
+      preheader: `${data.purchaserName} te regalo $${data.amount.toLocaleString('es-AR')} en tratamientos.`,
+      title: 'Recibiste una Gift Card',
+      greetingName: data.recipientName,
+      variant: 'gift',
+      introHtml: `
+        <p><strong>${data.purchaserName}</strong> te ha regalado una Gift Card para que disfrutes de nuestros tratamientos de medicina estetica.</p>
+        ${
+          data.personalMessage
+            ? `
+        <div class="infoBox">
+          <p style="margin:0; font-style:italic; color:#7A7A7A;">
+            <strong>Mensaje de ${data.purchaserName}:</strong><br>
+            "${data.personalMessage}"
+          </p>
+        </div>
+        `
+            : ''
+        }
+      `,
+      bodyHtml: `
+        <div class="infoBox" style="text-align:center; padding:24px; background: linear-gradient(135deg, #FCE4EC 0%, #FFFFFF 100%);">
+          <p style="margin:0 0 8px 0; font-size:12px; color:#7A7A7A; text-transform:uppercase; letter-spacing:1px;">Codigo de Gift Card</p>
+          <p style="margin:0 0 16px 0; font-size:28px; font-weight:bold; color:#E91E63; font-family:'Courier New',monospace; letter-spacing:2px;">${data.code}</p>
+          <p style="margin:0; font-size:32px; font-weight:bold; color:#E91E63;">$${data.amount.toLocaleString('es-AR')}</p>
+        </div>
+
+        <div class="infoBox">
+          <p style="margin:0 0 12px 0; font-weight:bold; color:#E91E63;">Como usar tu Gift Card</p>
+          <p class="infoRow">1. <strong>Agenda tu turno:</strong> escribinos por WhatsApp mencionando que tenes una Gift Card</p>
+          <p class="infoRow">2. <strong>Presenta tu codigo:</strong> comparti el codigo <strong>${data.code}</strong> cuando agendes</p>
+          <p class="infoRow" style="margin:0;">3. <strong>Disfruta:</strong> elegi el tratamiento que mas te guste</p>
+        </div>
+
+        <div class="infoBox">
+          <p style="margin:0 0 8px 0; font-weight:bold;">Condiciones</p>
+          <p class="infoRow" style="font-size:13px;">Valida por 90 dias (hasta el <strong>${new Date(data.expirationDate).toLocaleDateString('es-AR')}</strong>)</p>
+          <p class="infoRow" style="font-size:13px;">Puede usarse en uno o mas tratamientos hasta agotar el saldo</p>
+          <p class="infoRow" style="font-size:13px;">Tratamientos personalizados segun necesidad</p>
+          <p class="infoRow" style="font-size:13px;">No reembolsable ni canjeable por efectivo</p>
+          <p class="infoRow" style="font-size:13px; margin:0;">Turnos sujetos a disponibilidad</p>
+        </div>
+      `,
+      cta: {
+        label: 'Agendar por WhatsApp',
+        url: whatsappUrl,
+      },
+      footerLines: [
+        'Dra. Jaquelina Grassetti - Medicina Estetica',
+        'Junin 191, Piso VIII, Consultorio I, Rosario - Sta. Fe',
+        '+54 9 341 7511529',
+        'Instagram: @dra.jaquelinagrassetti',
+      ],
+    });
+  }
+
+  private getGiftCardPurchaseConfirmationTemplate(data: {
+    purchaserName: string;
+    recipientName: string;
+    code: string;
+    amount: number;
+    expirationDate: string;
+  }): string {
+    return this.getBaseEmailTemplate({
+      preheader: 'Tu compra de gift card fue aprobada.',
+      title: 'Compra de gift card confirmada',
+      greetingName: data.purchaserName,
+      variant: 'success',
+      introHtml:
+        '<p class="muted">Tu pago fue aprobado y la gift card quedo activa.</p>',
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow"><strong class="infoLabel">Destinatario:</strong> ${data.recipientName}</p>
+          <p class="infoRow"><strong class="infoLabel">Codigo:</strong> ${data.code}</p>
+          <p class="infoRow"><strong class="infoLabel">Monto:</strong> $${data.amount.toLocaleString('es-AR')}</p>
+          <p class="infoRow" style="margin:0;"><strong class="infoLabel">Vigencia:</strong> hasta ${new Date(data.expirationDate).toLocaleDateString('es-AR')}</p>
+        </div>
+        <p style="margin-top:14px;">Enviamos tambien la gift card al destinatario configurado.</p>
+      `,
+      footerLines: ['Consultorio Dra. Jaquelina Grassetti'],
     });
   }
 }

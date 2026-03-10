@@ -19,6 +19,8 @@ import { AppService } from './app.service';
 import { BlockedSlotsModule } from './modules/blocked-slots/blocked-slots.module';
 import { BusinessHoursModule } from './modules/business-hours/business-hours.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
+import { GiftCardsModule } from './modules/gift-cards/gift-cards.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 
 @Module({
   imports: [
@@ -57,6 +59,8 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     NotificationsModule,
     PaymentsModule,
     RemindersModule,
+    GiftCardsModule,
+    ReviewsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

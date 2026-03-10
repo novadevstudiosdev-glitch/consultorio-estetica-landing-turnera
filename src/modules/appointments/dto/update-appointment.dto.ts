@@ -1,5 +1,12 @@
-import { PartialType, OmitType } from '@nestjs/swagger';
-import { IsString, IsOptional, IsEnum, MaxLength } from 'class-validator';
+import { PartialType, OmitType, ApiProperty } from '@nestjs/swagger';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  MaxLength,
+  Matches,
+  IsDateString,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { CreateAppointmentDto } from './create-appointment.dto';
 import {
@@ -64,6 +71,35 @@ export class AdminCreateAppointmentDto extends CreateAppointmentDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   paymentMethod?: PaymentMethod;
+}
+
+// DTO para reagendar turno (solo paciente con turno pendiente)
+export class RescheduleAppointmentDto {
+  @ApiProperty({
+    example: '2026-03-15',
+    description: 'Nueva fecha del turno (YYYY-MM-DD)',
+  })
+  @IsDateString()
+  appointmentDate: string;
+
+  @ApiProperty({
+    example: '14:30',
+    description: 'Nueva hora del turno (HH:mm)',
+  })
+  @IsString()
+  @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: 'appointmentTime debe estar en formato HH:mm',
+  })
+  appointmentTime: string;
+
+  @ApiPropertyOptional({
+    example: 'Cliente solicitó cambio de horario',
+    description: 'Razón del cambio (opcional)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 // DTO para cancelar turno

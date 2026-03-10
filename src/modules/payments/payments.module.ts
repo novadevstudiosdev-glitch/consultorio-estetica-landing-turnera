@@ -4,12 +4,14 @@ import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { AppointmentsModule } from '../appointments/appointments.module';
+import { GiftCardsModule } from '../gift-cards/gift-cards.module';
 import { WhatsappService } from '../../common/services/whatsapp.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Appointment]),
     AppointmentsModule, // Para usar AppointmentsService
+    GiftCardsModule, // Para usar GiftCardsService
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService, WhatsappService],
