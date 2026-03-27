@@ -17,7 +17,7 @@ export class EmailService {
       'onboarding@resend.dev';
     this.fromName =
       this.configService.get<string>('EMAIL_FROM_NAME') ||
-      'Dra. Jaquelina Grassetti';
+      'Dra. Jaquelina Grassetti - Medicina Estetica';
 
     if (!apiKey) {
       this.logger.warn(
@@ -58,7 +58,7 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: 'Verifica tu cuenta - Turnera Médica',
+        subject: 'Verifica tu cuenta - Dra. Jaquelina Grassetti - Medicina Estetica',
         html,
       });
 
@@ -100,7 +100,7 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: 'Recupera tu contraseña - Turnera Médica',
+        subject: 'Recupera tu contraseña - Dra. Jaquelina Grassetti - Medicina Estetica',
         html,
       });
 
@@ -143,7 +143,7 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: 'Turno confirmado - Turnera Médica',
+        subject: 'Turno confirmado - Dra. Jaquelina Grassetti - Medicina Estetica',
         html,
       });
 
@@ -191,7 +191,7 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: 'Turno reprogramado - Turnera Médica',
+        subject: 'Turno reprogramado - Dra. Jaquelina Grassetti - Medicina Estetica',
         html,
       });
 
@@ -232,7 +232,7 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: 'Recordatorio de turno - Turnera Médica',
+        subject: 'Recordatorio de turno - Dra. Jaquelina Grassetti - Medicina Estetica',
         html,
       });
 
@@ -273,7 +273,7 @@ export class EmailService {
       const { data, error } = await this.resend.emails.send({
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: 'Turno cancelado - Turnera Médica',
+        subject: 'Turno cancelado - Dra. Jaquelina Grassetti - Medicina Estetica',
         html,
       });
 
@@ -462,10 +462,11 @@ export class EmailService {
     }[variant];
 
     const businessName =
-      this.configService.get('BUSINESS_NAME') || 'Dra. Jaquelina Grassetti';
+      this.configService.get('BUSINESS_NAME') ||
+      'Dra. Jaquelina Grassetti - Medicina Estetica';
     const businessAddress =
       this.configService.get('BUSINESS_ADDRESS') ||
-      'Junín 191, Piso VIII, Consultorio I, Rosario - Sta. Fe';
+      'Junín 191 - Alto Buró - Rosario, Argentina';
     const businessPhone =
       this.configService.get('BUSINESS_PHONE') || '+54 9 341 7511529';
     const footerDefault = [businessName, businessAddress, businessPhone].filter(
@@ -890,9 +891,8 @@ export class EmailService {
       },
       footerLines: [
         'Dra. Jaquelina Grassetti - Medicina Estetica',
-        'Junin 191, Piso VIII, Consultorio I, Rosario - Sta. Fe',
+        'Junín 191 - Alto Buró - Rosario, Argentina',
         '+54 9 341 7511529',
-        'Instagram: @dra.jaquelinagrassetti',
       ],
     });
   }
@@ -920,7 +920,11 @@ export class EmailService {
         </div>
         <p style="margin-top:14px;">Enviamos tambien la gift card al destinatario configurado.</p>
       `,
-      footerLines: ['Consultorio Dra. Jaquelina Grassetti'],
+      footerLines: [
+        'Dra. Jaquelina Grassetti - Medicina Estetica',
+        'Junín 191 - Alto Buró - Rosario, Argentina',
+        '+54 9 341 7511529',
+      ],
     });
   }
 }
