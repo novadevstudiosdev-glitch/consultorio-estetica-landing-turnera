@@ -129,6 +129,7 @@ export class EmailService {
       date: string;
       time: string;
       depositAmount?: number;
+      location?: string;
     },
   ): Promise<boolean> {
     if (!this.resend) {
@@ -217,6 +218,7 @@ export class EmailService {
       serviceName: string;
       date: string;
       time: string;
+      location?: string;
     },
   ): Promise<void> {
     if (!this.resend) {
@@ -673,13 +675,23 @@ export class EmailService {
     });
   }
 
+  private static readonly LOCATION_ADDRESSES: Record<string, string> = {
+    rosario: 'Junín 191 - Alto Buró - Rosario, Argentina',
+    correa: '25 de mayo 1214, Correa. CP 2506',
+  };
+
   private getAppointmentConfirmationTemplate(data: {
     patientName: string;
     serviceName: string;
     date: string;
     time: string;
     depositAmount?: number;
+    location?: string;
   }): string {
+    const addressLine = data.location
+      ? EmailService.LOCATION_ADDRESSES[data.location.toLowerCase()]
+      : undefined;
+
     return this.getBaseEmailTemplate({
       preheader: 'Tu turno quedó confirmado.',
       title: 'Turno confirmado',
@@ -691,6 +703,7 @@ export class EmailService {
           <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
           <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
           <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
+          ${addressLine ? `<p class="infoRow"><strong>Dirección:</strong> ${addressLine}</p>` : ``}
           ${
             data.depositAmount
               ? `<p class="infoRow"><strong>Seña:</strong> $${data.depositAmount}</p>`
@@ -757,8 +770,12 @@ export class EmailService {
     serviceName: string;
     date: string;
     time: string;
+    location?: string;
   }): string {
     const appointmentsUrl = this.getPatientAppointmentsUrl();
+    const addressLine = data.location
+      ? EmailService.LOCATION_ADDRESSES[data.location.toLowerCase()]
+      : undefined;
 
     return this.getBaseEmailTemplate({
       preheader: 'Recordatorio: tenés un turno pronto.',
@@ -771,6 +788,7 @@ export class EmailService {
           <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
           <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
           <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
+          ${addressLine ? `<p class="infoRow"><strong>Dirección:</strong> ${addressLine}</p>` : ``}
         </div>
         <p style="margin-top:14px;">Si necesitás reprogramar, podés hacerlo desde tu cuenta.</p>
       `,

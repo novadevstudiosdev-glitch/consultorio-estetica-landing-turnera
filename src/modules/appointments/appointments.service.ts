@@ -150,6 +150,7 @@ export class AppointmentsService {
               serviceName: service.name,
               date: saved.appointmentDate.toString(),
               time: saved.appointmentTime,
+              location: saved.location,
             },
           );
 
@@ -299,6 +300,7 @@ export class AppointmentsService {
                 date: updated.appointmentDate.toString(),
                 time: updated.appointmentTime,
                 depositAmount: updated.service?.depositAmount,
+                location: updated.location,
               },
             );
 

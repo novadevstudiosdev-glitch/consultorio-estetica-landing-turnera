@@ -132,6 +132,9 @@ export class Appointment {
   @Column({ name: 'cancellation_reason', type: 'text', nullable: true })
   cancellationReason?: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  location?: string;
+
   // Flags
   @Column({ name: 'created_by_admin', type: 'boolean', default: false })
   createdByAdmin: boolean;

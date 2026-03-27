@@ -21,6 +21,7 @@ import { BusinessHoursModule } from './modules/business-hours/business-hours.mod
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { GiftCardsModule } from './modules/gift-cards/gift-cards.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
+import { SeoModule } from './modules/seo/seo.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { ReviewsModule } from './modules/reviews/reviews.module';
     RemindersModule,
     GiftCardsModule,
     ReviewsModule,
+    SeoModule,
   ],
   controllers: [AppController],
   providers: [AppService],

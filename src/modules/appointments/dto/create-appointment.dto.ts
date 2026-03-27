@@ -83,4 +83,13 @@ export class CreateAppointmentDto {
   @IsOptional()
   @IsUUID('4', { message: 'El ID de la gift card debe ser un UUID válido' })
   giftCardId?: string;
+
+  @ApiPropertyOptional({
+    example: 'rosario',
+    description: 'Sede del turno: rosario o correa',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  location?: string;
 }

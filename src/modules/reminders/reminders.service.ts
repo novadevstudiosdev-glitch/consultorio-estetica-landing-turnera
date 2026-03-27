@@ -62,6 +62,7 @@ export class RemindersService {
                 serviceName: appointment.service.name,
                 date: appointment.appointmentDate.toString(),
                 time: appointment.appointmentTime,
+                location: appointment.location,
               },
             );
             emailSent = true;
@@ -165,6 +166,7 @@ export class RemindersService {
                   serviceName: appointment.service.name,
                   date: appointment.appointmentDate.toString(),
                   time: appointment.appointmentTime,
+                  location: appointment.location,
                 },
               );
               emailSent = true;
