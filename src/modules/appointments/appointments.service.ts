@@ -140,7 +140,7 @@ export class AppointmentsService {
     );
 
     // Enviar confirmación si el turno está confirmado
-    if (saved.status === AppointmentStatus.CONFIRMED) {
+    if (saved.status === AppointmentStatus.CONFIRMED && saved.patientEmail) {
       try {
         const confirmationSent =
           await this.emailService.sendAppointmentConfirmation(

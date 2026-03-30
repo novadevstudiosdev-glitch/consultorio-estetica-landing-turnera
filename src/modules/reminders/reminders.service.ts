@@ -54,23 +54,25 @@ export class RemindersService {
       for (const appointment of appointments) {
         try {
           let emailSent = false;
-          try {
-            await this.emailService.sendAppointmentReminder(
-              appointment.patientEmail,
-              {
-                patientName: appointment.patientName,
-                serviceName: appointment.service.name,
-                date: appointment.appointmentDate.toString(),
-                time: appointment.appointmentTime,
-                location: appointment.location,
-              },
-            );
-            emailSent = true;
-          } catch (error) {
-            this.logger.error(
-              `❌ Error enviando email recordatorio 24h a ${appointment.patientEmail}:`,
-              error,
-            );
+          if (appointment.patientEmail) {
+            try {
+              await this.emailService.sendAppointmentReminder(
+                appointment.patientEmail,
+                {
+                  patientName: appointment.patientName,
+                  serviceName: appointment.service.name,
+                  date: appointment.appointmentDate.toString(),
+                  time: appointment.appointmentTime,
+                  location: appointment.location,
+                },
+              );
+              emailSent = true;
+            } catch (error) {
+              this.logger.error(
+                `❌ Error enviando email recordatorio 24h a ${appointment.patientEmail}:`,
+                error,
+              );
+            }
           }
 
           const whatsappSent = await this.whatsappService.send24HourReminder({
@@ -94,7 +96,7 @@ export class RemindersService {
           await this.appointmentsRepository.save(appointment);
 
           this.logger.log(
-            `✅ Recordatorio 24h enviado: ${appointment.patientEmail}`,
+            `✅ Recordatorio 24h enviado: ${appointment.patientEmail ?? 'sin email'}`,
           );
         } catch (error) {
           this.logger.error(
@@ -158,23 +160,25 @@ export class RemindersService {
         ) {
           try {
             let emailSent = false;
-            try {
-              await this.emailService.sendAppointmentReminder(
-                appointment.patientEmail,
-                {
-                  patientName: appointment.patientName,
-                  serviceName: appointment.service.name,
-                  date: appointment.appointmentDate.toString(),
-                  time: appointment.appointmentTime,
-                  location: appointment.location,
-                },
-              );
-              emailSent = true;
-            } catch (error) {
-              this.logger.error(
-                `❌ Error enviando email recordatorio 2h a ${appointment.patientEmail}:`,
-                error,
-              );
+            if (appointment.patientEmail) {
+              try {
+                await this.emailService.sendAppointmentReminder(
+                  appointment.patientEmail,
+                  {
+                    patientName: appointment.patientName,
+                    serviceName: appointment.service.name,
+                    date: appointment.appointmentDate.toString(),
+                    time: appointment.appointmentTime,
+                    location: appointment.location,
+                  },
+                );
+                emailSent = true;
+              } catch (error) {
+                this.logger.error(
+                  `❌ Error enviando email recordatorio 2h a ${appointment.patientEmail}:`,
+                  error,
+                );
+              }
             }
 
             const whatsappSent = await this.whatsappService.send2HourReminder({
@@ -198,7 +202,7 @@ export class RemindersService {
             await this.appointmentsRepository.save(appointment);
 
             this.logger.log(
-              `✅ Recordatorio 2h enviado: ${appointment.patientEmail}`,
+              `✅ Recordatorio 2h enviado: ${appointment.patientEmail ?? 'sin email'}`,
             );
           } catch (error) {
             this.logger.error(

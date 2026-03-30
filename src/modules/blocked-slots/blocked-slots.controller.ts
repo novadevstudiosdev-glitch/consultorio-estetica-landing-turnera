@@ -82,15 +82,35 @@ export class BlockedSlotsController {
     type: String,
     description: 'YYYY-MM-DD',
   })
-  @ApiQuery({ name: 'isActive', required: false, type: Boolean })
+  @ApiQuery({
+    name: 'isActive',
+    required: false,
+    type: Boolean,
+    description: 'Filtrar por estado activo (true/false). Si no se envÃ­a, por defecto solo activos.',
+  })
+  @ApiQuery({
+    name: 'includeInactive',
+    required: false,
+    type: Boolean,
+    description:
+      'Si es true, incluye inactivos. No aplicar junto con isActive.',
+  })
   @ApiResponse({ status: 200, description: 'Lista de slots bloqueados' })
   async findAll(
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('isActive') isActive?: string,
+    @Query('includeInactive') includeInactive?: string,
   ) {
+    const includeInactiveBool = includeInactive === 'true';
     const isActiveBool =
-      isActive === 'true' ? true : isActive === 'false' ? false : undefined;
+      isActive === 'true'
+        ? true
+        : isActive === 'false'
+          ? false
+          : includeInactiveBool
+            ? undefined
+            : true;
     return await this.blockedSlotsService.findAll(
       startDate,
       endDate,
