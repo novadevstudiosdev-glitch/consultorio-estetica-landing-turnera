@@ -17,6 +17,16 @@ export enum BlockedSlotType {
 
 @Entity('blocked_slots')
 @Index(['blockedDate', 'isActive'])
+@Index('ux_blocked_slots_full_day_active', ['blockedDate'], {
+  unique: true,
+  where:
+    '"is_active" = true AND "start_time" IS NULL AND "end_time" IS NULL',
+})
+@Index('ux_blocked_slots_time_active', ['blockedDate', 'startTime', 'endTime'], {
+  unique: true,
+  where:
+    '"is_active" = true AND "start_time" IS NOT NULL AND "end_time" IS NOT NULL',
+})
 export class BlockedSlot {
   @PrimaryGeneratedColumn('uuid')
   id: string;

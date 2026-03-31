@@ -64,9 +64,9 @@ export class Appointment {
   @Column({ name: 'patient_name', type: 'varchar', length: 255 })
   patientName: string;
 
-  @Column({ name: 'patient_email', type: 'varchar', length: 255 })
+  @Column({ name: 'patient_email', type: 'varchar', length: 255, nullable: true })
   @Index()
-  patientEmail: string;
+  patientEmail?: string;
 
   @Column({ name: 'patient_phone', type: 'varchar', length: 50 })
   patientPhone: string;

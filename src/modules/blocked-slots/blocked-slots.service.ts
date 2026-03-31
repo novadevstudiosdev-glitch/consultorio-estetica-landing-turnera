@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull, Not } from 'typeorm';
 import { BlockedSlot, BlockedSlotType } from './entities/blocked-slot.entity';
 import {
   CreateBlockedSlotDto,
@@ -25,14 +25,47 @@ export class BlockedSlotsService {
    * Crear slot bloqueado
    */
   async create(createDto: CreateBlockedSlotDto): Promise<BlockedSlot> {
-    // Validar que endTime > startTime si ambos existen
-    if (createDto.endTime <= createDto.startTime) {
-      throw new BadRequestException(
-        'La hora de fin debe ser posterior a la de inicio',
-      );
+    const normalized = this.normalizeTimes(
+      createDto.startTime,
+      createDto.endTime,
+    );
+
+    const existingActive = await this.findActiveByKey(
+      createDto.blockedDate,
+      normalized.startTime,
+      normalized.endTime,
+    );
+    if (existingActive) {
+      return existingActive;
     }
 
-    const blockedSlot = this.blockedSlotsRepository.create(createDto);
+    const existingInactive = await this.findInactiveByKey(
+      createDto.blockedDate,
+      normalized.startTime,
+      normalized.endTime,
+    );
+    if (existingInactive) {
+      existingInactive.isActive = true;
+      if (createDto.type) {
+        existingInactive.type = createDto.type;
+      }
+      if (createDto.reason !== undefined) {
+        existingInactive.reason = createDto.reason;
+      }
+      const reactivated = await this.blockedSlotsRepository.save(
+        existingInactive,
+      );
+      this.logger.log(
+        `Slot bloqueado reactivado: ${reactivated.blockedDate} ${reactivated.startTime || 'TODO EL DÍA'}-${reactivated.endTime || ''}`,
+      );
+      return reactivated;
+    }
+
+    const blockedSlot = this.blockedSlotsRepository.create({
+      ...createDto,
+      startTime: normalized.startTime,
+      endTime: normalized.endTime,
+    });
     const saved = await this.blockedSlotsRepository.save(blockedSlot);
 
     this.logger.log(
@@ -94,17 +127,31 @@ export class BlockedSlotsService {
   ): Promise<BlockedSlot> {
     const blockedSlot = await this.findOne(id);
 
-    // Validar endTime > startTime si se actualizan
-    const newStartTime = updateDto.startTime || blockedSlot.startTime;
-    const newEndTime = updateDto.endTime || blockedSlot.endTime;
+    const newStartTime =
+      updateDto.startTime !== undefined
+        ? updateDto.startTime
+        : blockedSlot.startTime;
+    const newEndTime =
+      updateDto.endTime !== undefined ? updateDto.endTime : blockedSlot.endTime;
 
-    if (newEndTime <= newStartTime) {
+    const normalized = this.normalizeTimes(newStartTime, newEndTime);
+
+    const existingActive = await this.findActiveByKey(
+      updateDto.blockedDate || blockedSlot.blockedDate,
+      normalized.startTime,
+      normalized.endTime,
+      id,
+    );
+    if (existingActive) {
       throw new BadRequestException(
-        'La hora de fin debe ser posterior a la de inicio',
+        'Ya existe un bloqueo activo con la misma fecha y horario',
       );
     }
 
-    Object.assign(blockedSlot, updateDto);
+    Object.assign(blockedSlot, updateDto, {
+      startTime: normalized.startTime,
+      endTime: normalized.endTime,
+    });
     const updated = await this.blockedSlotsRepository.save(blockedSlot);
 
     this.logger.log(`Slot bloqueado actualizado: ${updated.blockedDate}`);
@@ -117,8 +164,11 @@ export class BlockedSlotsService {
   async remove(id: string): Promise<void> {
     const blockedSlot = await this.findOne(id);
 
-    blockedSlot.isActive = false;
-    await this.blockedSlotsRepository.save(blockedSlot);
+    await this.deactivateActiveDuplicatesByKey(
+      blockedSlot.blockedDate,
+      blockedSlot.startTime ?? null,
+      blockedSlot.endTime ?? null,
+    );
 
     this.logger.log(`Slot bloqueado desactivado: ${blockedSlot.blockedDate}`);
   }
@@ -128,6 +178,13 @@ export class BlockedSlotsService {
    */
   async activate(id: string): Promise<BlockedSlot> {
     const blockedSlot = await this.findOne(id);
+
+    await this.deactivateActiveDuplicatesByKey(
+      blockedSlot.blockedDate,
+      blockedSlot.startTime ?? null,
+      blockedSlot.endTime ?? null,
+      id,
+    );
 
     blockedSlot.isActive = true;
     const activated = await this.blockedSlotsRepository.save(blockedSlot);
@@ -160,11 +217,42 @@ export class BlockedSlotsService {
     while (currentDate <= end) {
       const dateStr = this.formatLocalDate(currentDate);
 
+      const existingActive = await this.findActiveByKey(
+        dateStr,
+        null,
+        null,
+      );
+      if (existingActive) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        continue;
+      }
+
+      const existingInactive = await this.findInactiveByKey(
+        dateStr,
+        null,
+        null,
+      );
+      if (existingInactive) {
+        existingInactive.isActive = true;
+        existingInactive.type = type;
+        if (reason !== undefined) {
+          existingInactive.reason = reason;
+        }
+        const reactivated = await this.blockedSlotsRepository.save(
+          existingInactive,
+        );
+        created.push(reactivated);
+        currentDate.setDate(currentDate.getDate() + 1);
+        continue;
+      }
+
       const blockedSlot = this.blockedSlotsRepository.create({
         blockedDate: dateStr as any,
         type,
         reason,
         isActive: true,
+        startTime: null,
+        endTime: null,
       });
 
       const saved = await this.blockedSlotsRepository.save(blockedSlot);
@@ -177,6 +265,108 @@ export class BlockedSlotsService {
       `Rango bloqueado: ${startDate} a ${endDate} (${created.length} días)`,
     );
     return created;
+  }
+
+  private normalizeTimes(
+    startTime?: string | null,
+    endTime?: string | null,
+  ): { startTime: string | null; endTime: string | null } {
+    const hasStart = startTime !== undefined && startTime !== null;
+    const hasEnd = endTime !== undefined && endTime !== null;
+
+    if (hasStart !== hasEnd) {
+      throw new BadRequestException(
+        'Debes indicar ambas horas (inicio y fin) o ninguna para todo el dÃ­a',
+      );
+    }
+
+    if (hasStart && hasEnd) {
+      const startMinutes = this.timeToMinutes(startTime!);
+      const endMinutes = this.timeToMinutes(endTime!);
+      if (startMinutes === null || endMinutes === null) {
+        throw new BadRequestException('Formato de hora invÃ¡lido');
+      }
+      if (endMinutes <= startMinutes) {
+        throw new BadRequestException(
+          'La hora de fin debe ser posterior a la de inicio',
+        );
+      }
+    }
+
+    return {
+      startTime: hasStart ? startTime! : null,
+      endTime: hasEnd ? endTime! : null,
+    };
+  }
+
+  private timeToMinutes(time: string): number | null {
+    const [hours, minutes] = time.split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+      return null;
+    }
+    return hours * 60 + minutes;
+  }
+
+  private async findActiveByKey(
+    blockedDate: string | Date,
+    startTime: string | null,
+    endTime: string | null,
+    excludeId?: string,
+  ): Promise<BlockedSlot | null> {
+    const where: Record<string, unknown> = {
+      blockedDate: blockedDate as any,
+      isActive: true,
+      startTime: startTime ?? IsNull(),
+      endTime: endTime ?? IsNull(),
+    };
+    if (excludeId) {
+      where.id = Not(excludeId);
+    }
+    return await this.blockedSlotsRepository.findOne({ where });
+  }
+
+  private async findInactiveByKey(
+    blockedDate: string | Date,
+    startTime: string | null,
+    endTime: string | null,
+  ): Promise<BlockedSlot | null> {
+    return await this.blockedSlotsRepository.findOne({
+      where: {
+        blockedDate: blockedDate as any,
+        isActive: false,
+        startTime: startTime ?? IsNull(),
+        endTime: endTime ?? IsNull(),
+      },
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  private async deactivateActiveDuplicatesByKey(
+    blockedDate: string | Date,
+    startTime: string | null,
+    endTime: string | null,
+    excludeId?: string,
+  ): Promise<void> {
+    const query = this.blockedSlotsRepository
+      .createQueryBuilder()
+      .update(BlockedSlot)
+      .set({ isActive: false })
+      .where('blocked_date = :blockedDate', { blockedDate })
+      .andWhere('is_active = true');
+
+    if (startTime === null && endTime === null) {
+      query.andWhere('start_time IS NULL').andWhere('end_time IS NULL');
+    } else {
+      query
+        .andWhere('start_time = :startTime', { startTime })
+        .andWhere('end_time = :endTime', { endTime });
+    }
+
+    if (excludeId) {
+      query.andWhere('id <> :excludeId', { excludeId });
+    }
+
+    await query.execute();
   }
 
   private parseLocalDate(value: string): Date {
