@@ -7,6 +7,7 @@ import {
   Matches,
   IsDateString,
   IsEmail,
+  MinLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { CreateAppointmentDto } from './create-appointment.dto';
@@ -47,6 +48,7 @@ export class UpdateAppointmentDto extends PartialType(CreateAppointmentDto) {
 // DTO para crear turno como admin (sin validaciones de disponibilidad)
 export class AdminCreateAppointmentDto extends OmitType(CreateAppointmentDto, [
   'patientEmail',
+  'patientPhone',
 ] as const) {
   @ApiPropertyOptional({
     example: 'juan.perez@gmail.com',
@@ -55,6 +57,14 @@ export class AdminCreateAppointmentDto extends OmitType(CreateAppointmentDto, [
   @IsOptional()
   @IsEmail({}, { message: 'El email debe ser válido' })
   patientEmail?: string;
+  @ApiPropertyOptional({
+    example: '+54 341 1234567',
+    description: 'Teléfono del paciente (opcional para admin)',
+  })
+  @IsOptional()
+  @IsString({ message: 'El teléfono debe ser un texto' })
+  @MinLength(8, { message: 'El teléfono debe tener al menos 8 caracteres' })
+  patientPhone?: string;
   @ApiPropertyOptional({
     example: 'Turno creado por pedido telefónico',
     description: 'Notas internas del admin sobre la creación',
