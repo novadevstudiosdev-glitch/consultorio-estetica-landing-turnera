@@ -18,10 +18,19 @@ export enum DayOfWeek {
 }
 
 @Entity('business_hours')
-@Index(['dayOfWeek', 'isActive'])
+@Index(['location', 'dayOfWeek', 'isActive'])
 export class BusinessHours {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column({
+    name: 'location',
+    type: 'varchar',
+    length: 100,
+    default: 'Rosario',
+  })
+  @Index()
+  location: string; // Ubicación/sede (ej: "Rosario", "Correa")
 
   @Column({
     name: 'day_of_week',

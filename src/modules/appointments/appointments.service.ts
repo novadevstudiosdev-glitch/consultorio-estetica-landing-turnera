@@ -114,6 +114,8 @@ export class AppointmentsService {
     adminCreateDto: AdminCreateAppointmentDto,
     adminId: string,
   ): Promise<Appointment> {
+    await this.cancelExpiredPendingAppointments();
+
     // Verificar que el servicio existe
     const service = await this.servicesService.findOne(
       adminCreateDto.serviceId,
@@ -330,6 +332,7 @@ export class AppointmentsService {
     user?: User,
   ): Promise<Appointment> {
     const appointment = await this.findOne(id);
+    await this.cancelExpiredPendingAppointments();
 
     // Verificar permisos
     if (user) {
@@ -386,19 +389,11 @@ export class AppointmentsService {
     );
 
     // Validar disponibilidad (que no haya otro turno en ese slot)
-    const conflictingAppointment = await this.appointmentsRepository.findOne({
-      where: {
-        appointmentDate: rescheduleDto.appointmentDate as any,
-        appointmentTime: rescheduleDto.appointmentTime,
-        status: AppointmentStatus.CONFIRMED,
-      },
-    });
-
-    if (conflictingAppointment && conflictingAppointment.id !== id) {
-      throw new BadRequestException(
-        `Ya existe un turno confirmado para ${rescheduleDto.appointmentDate} a las ${rescheduleDto.appointmentTime}`,
-      );
-    }
+    await this.validateSlotAvailability(
+      rescheduleDto.appointmentDate,
+      rescheduleDto.appointmentTime,
+      id,
+    );
 
     // Guardar fecha/hora anterior para el email
     const previousDate =

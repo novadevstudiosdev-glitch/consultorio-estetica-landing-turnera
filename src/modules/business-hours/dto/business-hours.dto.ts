@@ -12,6 +12,15 @@ import { Type } from 'class-transformer';
 import { DayOfWeek } from '../entities/business-hours.entity';
 
 export class CreateBusinessHoursDto {
+  @ApiPropertyOptional({
+    example: 'Rosario',
+    description: 'Ubicación/sede para estos horarios',
+    default: 'Rosario',
+  })
+  @IsOptional()
+  @IsString()
+  location?: string;
+
   @ApiProperty({
     enum: DayOfWeek,
     example: DayOfWeek.MONDAY,

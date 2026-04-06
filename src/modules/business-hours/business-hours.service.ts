@@ -32,22 +32,27 @@ export class BusinessHoursService {
       );
     }
 
-    // Verificar si ya existe para ese día
+    const location = createDto.location || 'Rosario';
+
+    // Verificar si ya existe para ese día y ubicación
     const existing = await this.businessHoursRepository.findOne({
-      where: { dayOfWeek: createDto.dayOfWeek },
+      where: { dayOfWeek: createDto.dayOfWeek, location },
     });
 
     if (existing) {
       throw new BadRequestException(
-        `Ya existe una configuración para ${createDto.dayOfWeek}. Usa PATCH para actualizar.`,
+        `Ya existe una configuración para ${createDto.dayOfWeek} en ${location}. Usa PATCH para actualizar.`,
       );
     }
 
-    const businessHours = this.businessHoursRepository.create(createDto);
+    const businessHours = this.businessHoursRepository.create({
+      ...createDto,
+      location,
+    });
     const saved = await this.businessHoursRepository.save(businessHours);
 
     this.logger.log(
-      `Horario creado: ${saved.dayOfWeek} ${saved.openTime}-${saved.closeTime}`,
+      `Horario creado: ${saved.location} ${saved.dayOfWeek} ${saved.openTime}-${saved.closeTime}`,
     );
     return saved;
   }
@@ -79,11 +84,11 @@ export class BusinessHoursService {
   }
 
   /**
-   * Obtener horario por día de la semana
+   * Obtener horario por día de la semana y ubicación
    */
-  async findByDay(dayOfWeek: DayOfWeek): Promise<BusinessHours | null> {
+  async findByDay(dayOfWeek: DayOfWeek, location: string = 'Rosario'): Promise<BusinessHours | null> {
     return await this.businessHoursRepository.findOne({
-      where: { dayOfWeek, isActive: true },
+      where: { dayOfWeek, location, isActive: true },
     });
   }
 
