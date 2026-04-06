@@ -33,8 +33,10 @@ export enum PaymentMethod {
   NONE = 'none', // Sin pago (ej: servicios gratuitos)
 }
 
+// Uniqueness for (appointmentDate, appointmentTime) is enforced by a partial
+// index at DB level that excludes cancelled appointments — see migration
+// PartialUniqueIndexAppointments1749200000000.
 @Entity('appointments')
-@Index(['appointmentDate', 'appointmentTime'], { unique: true })
 export class Appointment {
   @PrimaryGeneratedColumn('uuid')
   id: string;

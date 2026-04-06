@@ -1,5 +1,6 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { join } from 'path';
 
 import { User } from '../modules/users/entities/user.entity';
 import { PasswordResetToken } from '../modules/users/entities/password-reset-token.entity';
@@ -32,6 +33,8 @@ export const getDatabaseConfig = (
     Review,
     // Agregar más cuando las crees
   ],
+  migrations: [join(__dirname, '..', 'migrations', '*.{ts,js}')],
+  migrationsRun: true,
   synchronize: configService.get('NODE_ENV') === 'development',
   logging: configService.get('NODE_ENV') === 'development',
 
