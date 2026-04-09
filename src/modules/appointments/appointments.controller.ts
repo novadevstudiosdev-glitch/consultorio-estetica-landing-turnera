@@ -121,7 +121,7 @@ export class AppointmentsController {
     @Query('endDate') endDate?: string,
   ) {
     const pageNum = page ? Math.max(1, parseInt(page, 10)) : 1;
-    const limitNum = limit ? Math.max(1, parseInt(limit, 10)) : 20;
+    const limitNum = limit ? Math.max(1, parseInt(limit, 10)) : 100;
 
     return await this.appointmentsService.findAll(
       undefined,
@@ -284,6 +284,14 @@ export class AppointmentsController {
     @CurrentUser() user?: User,
   ) {
     return await this.appointmentsService.reschedule(id, rescheduleDto, user);
+  }
+
+  @Post(':id/simulate-payment')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[SOLO DEV] Simular pago aprobado para testing de emails' })
+  async simulatePayment(@Param('id', ParseUUIDPipe) id: string) {
+    return await this.appointmentsService.simulatePaymentConfirmation(id);
   }
 
   @Post(':id/cancel')

@@ -345,6 +345,156 @@ export class EmailService {
     }
   }
 
+  /**
+   * Notificar a la doctora: nuevo turno confirmado y pagado por un paciente
+   */
+  async sendDoctorNewAppointmentNotification(data: {
+    patientName: string;
+    patientEmail: string;
+    patientPhone?: string;
+    serviceName: string;
+    date: string;
+    time: string;
+    depositAmount?: number;
+    location?: string;
+  }): Promise<void> {
+    const doctorEmail = this.configService.get<string>(
+      'DOCTOR_NOTIFICATION_EMAIL',
+    );
+
+    if (!doctorEmail) {
+      this.logger.warn(
+        '⚠️ DOCTOR_NOTIFICATION_EMAIL no configurado. No se notificó a la doctora.',
+      );
+      return;
+    }
+
+    if (!this.resend) {
+      this.logger.warn(
+        `📧 [SIMULATED] Doctor new appointment notification to ${doctorEmail}`,
+      );
+      return;
+    }
+
+    const addressLine = data.location
+      ? EmailService.LOCATION_ADDRESSES[data.location.toLowerCase()]
+      : undefined;
+
+    const html = this.getBaseEmailTemplate({
+      preheader: `Nuevo turno confirmado: ${data.patientName} - ${data.date} ${data.time}`,
+      title: 'Nuevo turno confirmado',
+      greetingName: 'Dra. Grassetti',
+      variant: 'success',
+      introHtml: `<p class="muted">Un paciente confirmó y pagó su turno.</p>`,
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow"><strong>Paciente:</strong> ${data.patientName}</p>
+          <p class="infoRow"><strong>Email:</strong> ${data.patientEmail}</p>
+          ${data.patientPhone ? `<p class="infoRow"><strong>Teléfono:</strong> ${data.patientPhone}</p>` : ''}
+          <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+          <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
+          <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
+          ${addressLine ? `<p class="infoRow"><strong>Dirección:</strong> ${addressLine}</p>` : ''}
+          ${data.depositAmount ? `<p class="infoRow"><strong>Seña abonada:</strong> $${data.depositAmount}</p>` : ''}
+        </div>
+      `,
+    });
+
+    try {
+      const { data: emailData, error } = await this.resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: doctorEmail,
+        subject: `Nuevo turno: ${data.patientName} - ${data.date} ${data.time}`,
+        html,
+      });
+
+      if (error) throw error;
+
+      this.logger.log(
+        `📧 Notificación de nuevo turno enviada a la doctora (ID: ${emailData?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error enviando notificación de nuevo turno a la doctora:`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Notificar a la doctora: turno cancelado
+   */
+  async sendDoctorCancellationNotification(data: {
+    patientName: string;
+    patientEmail: string;
+    patientPhone?: string;
+    serviceName: string;
+    date: string;
+    time: string;
+    reason?: string;
+    cancelledBy?: string;
+  }): Promise<void> {
+    const doctorEmail = this.configService.get<string>(
+      'DOCTOR_NOTIFICATION_EMAIL',
+    );
+
+    if (!doctorEmail) {
+      this.logger.warn(
+        '⚠️ DOCTOR_NOTIFICATION_EMAIL no configurado. No se notificó a la doctora.',
+      );
+      return;
+    }
+
+    if (!this.resend) {
+      this.logger.warn(
+        `📧 [SIMULATED] Doctor cancellation notification to ${doctorEmail}`,
+      );
+      return;
+    }
+
+    const cancelledByLabel =
+      data.cancelledBy === 'admin' ? 'la administración' : 'el paciente';
+
+    const html = this.getBaseEmailTemplate({
+      preheader: `Turno cancelado: ${data.patientName} - ${data.date} ${data.time}`,
+      title: 'Turno cancelado',
+      greetingName: 'Dra. Grassetti',
+      variant: 'danger',
+      introHtml: `<p class="muted">Un turno confirmado fue cancelado por ${cancelledByLabel}.</p>`,
+      bodyHtml: `
+        <div class="infoBox">
+          <p class="infoRow"><strong>Paciente:</strong> ${data.patientName}</p>
+          <p class="infoRow"><strong>Email:</strong> ${data.patientEmail}</p>
+          ${data.patientPhone ? `<p class="infoRow"><strong>Teléfono:</strong> ${data.patientPhone}</p>` : ''}
+          <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
+          <p class="infoRow"><strong>Fecha:</strong> ${data.date}</p>
+          <p class="infoRow"><strong>Hora:</strong> ${data.time}</p>
+          ${data.reason ? `<p class="infoRow"><strong>Motivo:</strong> ${data.reason}</p>` : ''}
+        </div>
+      `,
+    });
+
+    try {
+      const { data: emailData, error } = await this.resend.emails.send({
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: doctorEmail,
+        subject: `Turno cancelado: ${data.patientName} - ${data.date} ${data.time}`,
+        html,
+      });
+
+      if (error) throw error;
+
+      this.logger.log(
+        `📧 Notificación de cancelación enviada a la doctora (ID: ${emailData?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error enviando notificación de cancelación a la doctora:`,
+        error,
+      );
+    }
+  }
+
   async sendGiftCardPurchaseConfirmation(
     to: string,
     data: {

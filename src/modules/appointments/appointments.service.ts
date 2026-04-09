@@ -169,6 +169,65 @@ export class AppointmentsService {
   }
 
   /**
+   * [SOLO DEV] Simular pago aprobado para testing de emails
+   */
+  async simulatePaymentConfirmation(id: string): Promise<{ message: string }> {
+    if (this.configService.get<string>('NODE_ENV') === 'production') {
+      throw new BadRequestException('Este endpoint no está disponible en producción');
+    }
+
+    const appointment = await this.findOne(id);
+
+    appointment.status = AppointmentStatus.CONFIRMED;
+    appointment.paymentStatus = PaymentStatus.PAID;
+    await this.appointmentsRepository.save(appointment);
+
+    // Email al paciente
+    if (appointment.patientEmail && !appointment.confirmationSent) {
+      try {
+        const sent = await this.emailService.sendAppointmentConfirmation(
+          appointment.patientEmail,
+          {
+            patientName: appointment.patientName,
+            serviceName: appointment.service?.name ?? 'Turno',
+            date: appointment.appointmentDate.toString(),
+            time: appointment.appointmentTime,
+            depositAmount: appointment.service?.depositAmount,
+            location: appointment.location,
+          },
+        );
+        if (sent) {
+          appointment.confirmationSent = true;
+          await this.appointmentsRepository.save(appointment);
+        }
+      } catch (error) {
+        this.logger.error('Error enviando email de confirmación al paciente:', error);
+      }
+    }
+
+    // Email a la doctora
+    if (!appointment.createdByAdmin) {
+      try {
+        await this.emailService.sendDoctorNewAppointmentNotification({
+          patientName: appointment.patientName,
+          patientEmail: appointment.patientEmail,
+          patientPhone: appointment.patientPhone,
+          serviceName: appointment.service?.name ?? 'Turno',
+          date: this.formatAppointmentDate(appointment.appointmentDate),
+          time: appointment.appointmentTime,
+          depositAmount: appointment.service?.depositAmount,
+          location: appointment.location,
+        });
+      } catch (error) {
+        this.logger.error('Error enviando notificación a la doctora:', error);
+      }
+    }
+
+    this.logger.log(`[DEV] Pago simulado para turno ${id}`);
+    return { message: `Pago simulado OK para turno ${id}. Revisá los emails.` };
+  }
+
+  /**
    * Listar turnos con filtros
    */
   async findAll(
@@ -177,7 +236,7 @@ export class AppointmentsService {
     startDate?: string,
     endDate?: string,
     page: number = 1,
-    limit: number = 20,
+    limit: number = 100,
   ): Promise<{
     data: Appointment[];
     total: number;
@@ -206,8 +265,8 @@ export class AppointmentsService {
       query.andWhere('appointment.appointmentDate <= :endDate', { endDate });
     }
 
-    query.orderBy('appointment.appointmentDate', 'ASC');
-    query.addOrderBy('appointment.appointmentTime', 'ASC');
+    query.orderBy('appointment.appointmentDate', 'DESC');
+    query.addOrderBy('appointment.appointmentTime', 'DESC');
 
     const total = await query.getCount();
     const data = await query
@@ -493,6 +552,27 @@ export class AppointmentsService {
       this.logger.error('Error enviando email de cancelación:', error);
     }
     if (transitionedFromConfirmedToCancelled) {
+      // Notificar a la doctora solo si el turno fue creado por un paciente (no admin)
+      if (!cancelled.createdByAdmin) {
+        try {
+          await this.emailService.sendDoctorCancellationNotification({
+            patientName: cancelled.patientName,
+            patientEmail: cancelled.patientEmail,
+            patientPhone: cancelled.patientPhone,
+            serviceName: cancelled.service.name,
+            date: this.formatAppointmentDate(cancelled.appointmentDate),
+            time: cancelled.appointmentTime,
+            reason: cancellationReason,
+            cancelledBy,
+          });
+        } catch (error) {
+          this.logger.error(
+            'Error enviando notificación de cancelación a la doctora:',
+            error,
+          );
+        }
+      }
+
       try {
         this.logger.log(
           `[WA-DIAG][appointments.cancel] attempting sendAppointmentCancelled appointmentId=${cancelled.id} patientPhone="${cancelled.patientPhone ?? ''}" doctorPhoneFallback="${this.configService.get<string>('DOCTOR_PHONE') ?? this.configService.get<string>('TWILIO_WHATSAPP_TO') ?? ''}"`,

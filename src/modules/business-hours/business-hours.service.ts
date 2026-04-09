@@ -86,7 +86,10 @@ export class BusinessHoursService {
   /**
    * Obtener horario por día de la semana y ubicación
    */
-  async findByDay(dayOfWeek: DayOfWeek, location: string = 'Rosario'): Promise<BusinessHours | null> {
+  async findByDay(
+    dayOfWeek: DayOfWeek,
+    location: string = 'Rosario',
+  ): Promise<BusinessHours | null> {
     return await this.businessHoursRepository.findOne({
       where: { dayOfWeek, location, isActive: true },
     });

@@ -652,6 +652,26 @@ export class PaymentsService {
             error as Error,
           );
         }
+
+        // Notificar a la doctora solo si el turno fue creado por un paciente (no admin)
+        if (!appointment.createdByAdmin) {
+          try {
+            await this.emailService.sendDoctorNewAppointmentNotification({
+              patientName: appointment.patientName,
+              patientEmail: appointment.patientEmail,
+              patientPhone: appointment.patientPhone,
+              serviceName: appointment.service?.name ?? 'Turno',
+              date: this.formatAppointmentDate(appointment.appointmentDate),
+              time: appointment.appointmentTime,
+              depositAmount: appointment.depositPaid ?? appointment.service?.depositAmount,
+            });
+          } catch (error) {
+            this.logger.error(
+              `Error enviando notificación de nuevo turno a la doctora para turno ${appointmentId}`,
+              error,
+            );
+          }
+        }
       } else {
         this.logger.log(
           `[WA-DIAG][payments.sync] skipping sendAppointmentCreated appointmentId=${appointmentId} because transition condition is false`,
