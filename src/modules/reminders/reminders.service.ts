@@ -34,7 +34,7 @@ export class RemindersService {
       const in24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       const in25Hours = new Date(now.getTime() + 25 * 60 * 60 * 1000);
 
-      const tomorrowDate = in24Hours.toISOString().split('T')[0];
+      const tomorrowDate = in24Hours.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 
       // Buscar turnos confirmados para mañana que NO hayan recibido recordatorio
       const appointments = await this.appointmentsRepository
@@ -127,8 +127,8 @@ export class RemindersService {
       const in2Hours = new Date(now.getTime() + 2 * 60 * 60 * 1000);
       const in2HoursPlus30 = new Date(now.getTime() + 2.5 * 60 * 60 * 1000);
 
-      const todayDate = now.toISOString().split('T')[0];
-      const targetTime = in2Hours.toTimeString().split(' ')[0].substring(0, 5); // HH:mm
+      const todayDate = now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+      const targetTime = in2Hours.toLocaleTimeString('en-GB', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', minute: '2-digit' }); // HH:mm
 
       // Buscar turnos confirmados para hoy en las próximas 2h que NO hayan recibido recordatorio
       const appointments = await this.appointmentsRepository
