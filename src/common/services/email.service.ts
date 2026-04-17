@@ -933,7 +933,7 @@ export class EmailService {
       title: 'Recordatorio de turno',
       greetingName: data.patientName,
       variant: 'warning',
-      introHtml: `<p class="muted">Te recordamos que <strong>mañana</strong> tenés turno:</p>`,
+      introHtml: `<p class="muted">Te recordamos que tenés un turno programado:</p>`,
       bodyHtml: `
         <div class="infoBox">
           <p class="infoRow"><strong>Servicio:</strong> ${data.serviceName}</p>
