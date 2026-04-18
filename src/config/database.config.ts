@@ -1,0 +1,44 @@
+import { TypeOrmModuleOptions } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
+import { join } from 'path';
+
+import { User } from '../modules/users/entities/user.entity';
+import { PasswordResetToken } from '../modules/users/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../modules/users/entities/email-verification-token.entity';
+import { Service } from '../modules/services/entities/service.entity';
+import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { BlockedSlot } from '@/modules/blocked-slots/entities/blocked-slot.entity';
+import { BusinessHours } from '@/modules/business-hours/entities/business-hours.entity';
+import { GiftCard } from '@/modules/gift-cards/entities/gift-card.entity';
+import { Review } from '@/modules/reviews/entities/review.entity';
+
+export const getDatabaseConfig = (
+  configService: ConfigService,
+): TypeOrmModuleOptions => ({
+  type: 'postgres',
+  host: configService.get('DB_HOST'),
+  port: configService.get('DB_PORT'),
+  username: configService.get('DB_USERNAME'),
+  password: configService.get('DB_PASSWORD'),
+  database: configService.get('DB_NAME'),
+  entities: [
+    User,
+    PasswordResetToken,
+    EmailVerificationToken,
+    Service,
+    Appointment,
+    BusinessHours,
+    BlockedSlot,
+    GiftCard,
+    Review,
+    // Agregar más cuando las crees
+  ],
+  migrations: [join(__dirname, '..', 'migrations', '*.{ts,js}')],
+  migrationsRun: true,
+  synchronize: configService.get('NODE_ENV') === 'development',
+  logging: configService.get('NODE_ENV') === 'development',
+
+  ssl: {
+    rejectUnauthorized: false, // Supabase requiere SSL
+  },
+});

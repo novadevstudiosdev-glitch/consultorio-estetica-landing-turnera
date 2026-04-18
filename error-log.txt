@@ -1,0 +1,173 @@
+
+> turnera-estetica-backend@1.0.0 start:dev
+> nest start --watch
+
+
+[48;2;60;190;100m[1m[38;2;0;0;0m Info [39m[22m[49m Webpack is building your sources...
+
+webpack 5.104.1 compiled [1m[32msuccessfully[39m[22m in 1306 ms
+Type-checking in progress...
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +24ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPassportModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mThrottlerModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDiscoveryModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +12ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mProductsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mBrandsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppointmentsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPaymentModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNotificationsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mScheduleModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 17368  - [39m16/02/2026, 11:58:59 a. m. [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJwtModule dependencies initialized[39m[38;5;3m +57ms[39m
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:01 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (1)...[39m
+SyntaxError: Invalid or unexpected token
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+No typescript errors found.
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:07 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (2)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:12 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (3)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:17 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (4)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:23 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (5)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:29 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (6)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:29 a. m. [31m  ERROR[39m [38;5;3m[EmailService] [39m[31mError en configuración de email:[39m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:29 a. m. [31m  ERROR[39m [38;5;3m[EmailService] [39mError: Greeting never received
+    at SMTPConnection._formatError [90m(C:\Users\PERSONAL\REPOSITORIO LOCAL\NovaDev\Real\turnera-estetica\turnera-estetica-backend\[39mnode_modules\[4mnodemailer[24m\lib\smtp-connection\index.js:912:19[90m)[39m
+    at SMTPConnection._onError [90m(C:\Users\PERSONAL\REPOSITORIO LOCAL\NovaDev\Real\turnera-estetica\turnera-estetica-backend\[39mnode_modules\[4mnodemailer[24m\lib\smtp-connection\index.js:893:20[90m)[39m
+    at Timeout.<anonymous> [90m(C:\Users\PERSONAL\REPOSITORIO LOCAL\NovaDev\Real\turnera-estetica\turnera-estetica-backend\[39mnode_modules\[4mnodemailer[24m\lib\smtp-connection\index.js:827:22[90m)[39m
+[90m    at listOnTimeout (node:internal/timers:588:17)[39m
+[90m    at process.processTimers (node:internal/timers:523:7)[39m {
+  code: [32m'ETIMEDOUT'[39m,
+  command: [32m'CONN'[39m
+}
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:34 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (7)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:40 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (8)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[90m[4mquery:[24m[39m [94mSELECT[0m [95mversion[0m[37m([0m[37m)[0m
+[90m[4mquery:[24m[39m [94mSELECT[0m [37m*[0m [94mFROM[0m [95mcurrent_schema[0m[37m([0m[37m)[0m
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:45 a. m. [31m  ERROR[39m [38;5;3m[TypeOrmModule] [39m[31mUnable to connect to the database. Retrying (9)...[39m
+SyntaxError: Unexpected token 'export'
+    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)
+    at Module._compile (node:internal/modules/cjs/loader:1712:5)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+[31m[Nest] 17368  - [39m16/02/2026, 11:59:45 a. m. [31m  ERROR[39m [38;5;3m[ExceptionHandler] [39mSyntaxError: Unexpected token 'export'
+[90m    at compileSourceTextModule (node:internal/modules/esm/utils:344:16)[39m
+[90m    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:420:18)[39m
+[90m    at loadESMFromCJS (node:internal/modules/cjs/loader:1561:24)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1712:5)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:1895:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1465:32)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1282:12)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)[39m
+[90m    at Module.require (node:internal/modules/cjs/loader:1487:12)[39m
